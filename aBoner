@@ -1,0 +1,870 @@
+package scripts.aBoner;
+
+
+import org.tribot.api.Clicking;
+import org.tribot.api.DynamicClicking;
+import org.tribot.api.General;
+import org.tribot.api.Timing;
+import org.tribot.api.input.Keyboard;
+import org.tribot.api.input.Mouse;
+import org.tribot.api.types.generic.Condition;
+import org.tribot.api.types.generic.Filter;
+import org.tribot.api2007.*;
+import org.tribot.api2007.ext.Filters;
+import org.tribot.api2007.types.RSArea;
+import org.tribot.api2007.types.RSItem;
+import org.tribot.api2007.types.RSObject;
+import org.tribot.api2007.types.RSTile;
+import org.tribot.script.Script;
+import org.tribot.script.ScriptManifest;
+import org.tribot.script.interfaces.Arguments;
+import org.tribot.script.interfaces.Painting;
+import scripts.aBoner.dax_api.api_lib.DaxWalker;
+import scripts.aBoner.dax_api.api_lib.models.DaxCredentials;
+import scripts.aBoner.dax_api.api_lib.models.DaxCredentialsProvider;
+
+import java.awt.*;
+import java.net.URL;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Random;
+
+
+@ScriptManifest(authors = {"adamhackz"}, category = "AdamSeries", name = "aBoner", description = "Dm for instructions", version = (1))
+
+//200-350 camera rotation for altar
+
+
+public class main extends Script implements Painting, Arguments {
+    private State SCRIPT_STATE = getState();
+
+    private boolean currentlyPerformingAction = false;
+    private boolean continuerunning = true;
+
+    private static final long START_TIME = System.currentTimeMillis();
+
+    private boolean hasCheckedBank = false;
+    public RSTile altar = new RSTile(2948, 2821, 0);
+    public RSTile level30 = new RSTile(2951, 3752, 0);
+
+    public RSTile altar1 = new RSTile(2948, 3820, 0);
+    public RSTile altar2 = new RSTile(2948, 3821, 0);
+
+    RSArea altararea = new RSArea(
+            new RSTile(2949, 3822, 0),
+            new RSTile(2953, 3819, 0)
+    );
+
+    RSArea runtoarea = new RSArea(
+            new RSTile(2946, 3751, 0),
+            new RSTile(2957, 3738, 0)
+    );
+
+
+    RSTile[] path = {
+            new RSTile(3031, 3837, 0),
+            new RSTile(3022, 3832, 0),
+            new RSTile(3015, 3828, 0),
+            new RSTile(3005, 3825, 0),
+            new RSTile(3002, 3824, 0),
+            new RSTile(2992, 3822, 0),
+            new RSTile(2983, 3821, 0),
+            new RSTile(2973, 3820, 0),
+            new RSTile(2971, 3820, 0),
+            new RSTile(2961, 3820, 0),
+            new RSTile(2959, 3820, 0)
+    };
+
+    RSArea outsideAltarArea = new RSArea(
+            new RSTile(2958, 3826, 0),
+            new RSTile(2966, 3814, 0)
+    );
+
+
+    private URL fxml;
+    private GUI gui;
+
+
+    @Override
+    public void run() {
+ /*
+        try {
+            fxml = new File( "C:\\Users\\Deez\\IdeaProjects\\TribotProjects\\src\\scripts\\aBoner\\javafx.fxml").toURI().toURL();
+        } catch (MalformedURLException e){
+            e.printStackTrace();
+        }
+        gui = new GUI(fxml);
+        gui.show();
+        while (gui.isOpen()){
+            sleep(500);
+        }
+        /*
+
+         */
+
+        if (onStart()) {
+            while (continuerunning) {
+                loop();
+            }
+        }
+    }
+
+
+    public enum Death {
+
+        WINE("WINE SUICIDE", "Wine of zamorak"),
+        LOCATOR("LOCATOR ORB", "Locator orb"),
+        FANATIC("CHAOS FANATIC", ""),
+        GE("NORMAL", "");
+
+        final String deathType;
+        final String requiredItem;
+
+        static final Death[] decision = {WINE, LOCATOR, FANATIC, GE};
+
+        Death(String deathType, String requiredItem) {
+            this.deathType = deathType;
+            this.requiredItem = requiredItem;
+        }
+
+        private String deathType() {
+            return deathType;
+        }
+
+        private String requiredItem() {
+            return requiredItem;
+        }
+    }
+
+    public enum Bones {
+
+        DRAGON("Dragon bones", 1),
+        BIG("Big bones", 1),
+        SUPERIOR("Superior dragon bones", 70);
+
+        final String boneName;
+        final int requiredLevel;
+
+        static final Bones[] bones = {DRAGON, BIG, SUPERIOR};
+
+        Bones(String boneName, int requiredLevel) {
+            this.boneName = boneName;
+            this.requiredLevel = requiredLevel;
+        }
+
+        private String getName() {
+            return boneName;
+        }
+
+        private int getRequiredLevel() {
+            return requiredLevel;
+        }
+
+    }
+
+    public enum World {
+
+        PVP("Dragon bones", 1),
+        RANDOM_MEMBERS("Big bones", 1),
+        SKILL_TOTAL_WORLDS("Superior dragon bones", 70);
+
+        final String worldType;
+        final int requiredTotalLevel;
+
+        static final World[] worldTypes = {PVP, RANDOM_MEMBERS, SKILL_TOTAL_WORLDS};
+
+        World(String worldType, int requiredTotalLevel) {
+            this.worldType = worldType;
+            this.requiredTotalLevel = requiredTotalLevel;
+        }
+
+        private String getName() {
+            return worldType;
+        }
+
+        private int getRequiredLevel() {
+            return requiredTotalLevel;
+        }
+
+    }
+
+
+    String args;
+
+    private State getState() {
+        if (!hasCheckedBank) {
+            return State.ON_START;
+        } else {
+
+            if (isAtGE()) {
+                if (hasBurningAmuletEquipped()) {
+                    if (hasRingOfWealthEquipped()) {
+                        if (hasBones()) {
+                            return State.RUN_TO_ALTAR;
+                        } else {
+                            return State.NEEDS_BONES;
+                        }
+                    } else {
+                        return State.NEEDS_RING;
+                    }
+                } else {
+                    return State.NEEDS_amulet;
+                }
+            } else {
+                if (hasBones()) {
+                    if (isNearAltar()) {
+                        return State.USE_BONES_ON_ALTAR;
+                    } else {
+                        return State.RUN_TO_ALTAR;
+                    }
+                } else {
+                    return State.TELE_TO_GE;
+                }
+
+
+            }
+        }
+
+
+    }
+
+
+    private boolean useAltar() {
+        RSItem[] bones = Inventory.find(args);
+        RSObject[] altar = Objects.find(10, "Chaos altar");
+        if (bones.length > 0 && bones[0] != null && !Game.getUptext().contains("Use")) {
+            if (Clicking.click("Use", bones[0])) {
+                Timing.waitCondition(new Condition() {
+                    @Override
+                    public boolean active() {
+                        return Game.getUptext().equals("Use " + args);
+                    }
+                }, General.random(2400, 2900));
+            }
+        }
+
+
+        if (altar.length > 0 && altar[0] != null && Game.isUptext("->")) {
+            if (DynamicClicking.clickRSObject(altar[0], "Use")) {
+                Timing.waitCondition(new Condition() {
+                    @Override
+                    public boolean active() {
+                        return Player.getAnimation() < 1;
+                    }
+                }, General.random(2300, 4200));
+            }
+        }
+        return true;
+    }
+
+
+
+
+
+    @Override
+    public void passArguments(HashMap<String, String> hashMap) {
+        if (hashMap.containsKey("custom_input")) {
+            args = hashMap.get("custom_input");
+        } else if (hashMap.containsKey("autostart")) {
+            args = hashMap.get("autostart");
+        }
+    }
+
+
+    @Override
+    public void onPaint(Graphics g) {
+        Random r = new Random();
+
+
+        long runtime = System.currentTimeMillis() - START_TIME;
+        g.setColor(Color.white);
+        g.drawString("aBoner", 5, 50);
+        g.drawString("Running for: " + Timing.msToString(runtime), 5, 70);
+
+        g.drawString("State: " + getState(), 5, 90);
+
+        g.drawString("Type of bones " + args, 5, 130);
+    }
+
+    private boolean onStart() {
+        daxStart();
+        if (args.isEmpty()) {
+            args.equals("Dragon bones");
+        }
+        return true;
+    }
+
+    public static boolean continuouslyAnimating() {
+        return Timing.waitCondition(new Condition() {
+            @Override
+            public boolean active() {
+                return Player.getAnimation() != -1;
+            }
+        }, General.random(4000, 6000));
+
+    }
+
+    private boolean hasItemFilter(String... ItemName) {
+        RSItem[] items = Inventory.find(Filters.Items.nameContains(ItemName));
+        return items.length > 0;
+    }
+
+    private boolean bankHasItemFilter(String... ItemName) {
+        RSItem[] items = Banking.find(Filters.Items.nameContains(ItemName));
+        return items.length > 0;
+    }
+
+
+    private boolean hasItem(String... ItemName) {
+        RSItem[] items = Inventory.find(ItemName);
+        return items.length > 0;
+    }
+
+    private boolean bankHasItem(String... ItemName) {
+        RSItem[] items = Banking.find(ItemName);
+        return items.length > 0;
+    }
+
+
+    private boolean amulet() {
+        if (!bankHasItemFilter("Burning amulet")) {
+            General.println("Out of burning amulets");
+            continuerunning = false;
+        }
+
+        if (bankHasItemFilter("Burning amulet") && !hasItemFilter("Burning amulet")) {
+            RSItem[] amulet = Banking.find(Filters.Items.nameContains("Burning amulet"));
+            if (amulet.length > 0) {
+                if (Banking.withdraw(1, amulet[0].getID())) {
+                    return Timing.waitCondition(new Condition() {
+                        @Override
+                        public boolean active() {
+                            return hasItemFilter("Burning amulet");
+                        }
+                    }, General.random(2000, 3000));
+                }
+
+            } else {
+                continuerunning = false;
+            }
+        }
+
+        if (Banking.isBankScreenOpen() && hasItemFilter("Burning amulet")) {
+            Banking.close();
+        }
+        return true;
+    }
+
+    private boolean ring() {
+        if (!bankHasItemFilter("Ring of wealth (")) {
+
+            General.println("Out of rings");
+            continuerunning = false;
+        }
+
+        if (bankHasItemFilter("Ring of wealth (") && !hasItemFilter("Ring of wealth (")) {
+            RSItem[] ring = Banking.find(Filters.Items.nameContains("Ring of wealth ("));
+            if (ring.length > 0) {
+                if (Banking.withdraw(1, ring[0].getID())) {
+                    return Timing.waitCondition(new Condition() {
+                        @Override
+                        public boolean active() {
+                            return hasItemFilter("Ring of wealth (");
+                        }
+                    }, General.random(2000, 3000));
+                }
+            } else {
+                continuerunning = false;
+            }
+        }
+
+        if (Banking.isBankScreenOpen() && hasItemFilter("Ring of wealth (")) {
+            Banking.close();
+        }
+        return true;
+    }
+
+
+    private boolean withdrawamulet() {
+
+        if (!Banking.isBankScreenOpen() && !hasItemFilter("Burning amulet")) {
+            Banking.openBank();
+            Timing.waitCondition(new Condition() {
+                @Override
+                public boolean active() {
+                    return !Player.isMoving();
+                }
+            }, General.random(1500, 2000));
+        }
+        if (Banking.isBankScreenOpen()) {
+            amulet();
+        }
+        return true;
+    }
+
+    private boolean withdrawring() {
+        if (!Banking.isBankScreenOpen() && !hasItemFilter("Ring of wealth (")) {
+            Banking.openBank();
+            Timing.waitCondition(new Condition() {
+                @Override
+                public boolean active() {
+                    return !Player.isMoving();
+                }
+            }, General.random(1500, 2000));
+        }
+        if (Banking.isBankScreenOpen()) {
+            ring();
+        }
+        return true;
+    }
+
+    private boolean bankHasCoins() {
+        return Banking.find("Coins").length > 0 && Banking.find("Coins")[0] != null;
+    }
+
+    private int loop() {
+        SCRIPT_STATE = getState();
+        General.sleep(50);
+
+        switch (SCRIPT_STATE) {
+
+            case RUN_TO_ALTAR:
+
+                if (Banking.isBankScreenOpen()) {
+                    Banking.close();
+                } else {
+                    if (hasBurningAmuletEquipped()) {
+                        if (isAtGE()) {
+                            General.println("Is at GE and will use burning amulet");
+                            RSItem[] amulet = Equipment.find(Filters.Items.nameContains("Burning amulet("));
+                            if (amulet.length > 0 && amulet[0] != null) {
+                                if (Combat.getWildernessLevel() < 1) {
+                                    if (!Interfaces.isInterfaceSubstantiated(219, 1, 2) && Player.getAnimation() < 1) {
+                                        Clicking.click("Lava Maze", amulet[0]);
+                                        Timing.waitCondition(new Condition() {
+                                            @Override
+                                            public boolean active() {
+                                                return Interfaces.isInterfaceSubstantiated(219, 1, 2);
+                                            }
+                                        }, General.random(3000, 5000));
+                                    } else {
+                                        Keyboard.typeString("1");
+                                        General.sleep(2000, 3000);
+                                    }
+                                } else {
+                                    RSTile pathermcPatherson[] = Walking.randomizePath(path, 4, 4);
+                                    if (Walking.walkPath(pathermcPatherson)) {
+                                        Timing.waitCondition(new Condition() {
+                                            @Override
+                                            public boolean active() {
+                                                return !Player.isMoving();
+                                            }
+                                        }, General.random(1500, 2000));
+                                    }
+                                }
+                            }
+                        } else {
+                            if (Combat.getWildernessLevel() > 0) {//custom walking
+                                if (!outsideAltarArea.contains(Player.getPosition())) {
+                                    RSTile pathermcPatherson[] = Walking.randomizePath(path, 4, 4);
+                                    if (Walking.walkPath(pathermcPatherson)) {
+                                        Timing.waitCondition(new Condition() {
+                                            @Override
+                                            public boolean active() {
+                                                return !Player.isMoving();
+                                            }
+                                        }, General.random(1500, 2000));
+                                    }
+                                } else {
+                                    General.println("is not at GE and needs to get to altar");
+                                    if (DaxWalker.walkTo(altararea.getRandomTile())) {
+                                        Timing.waitCondition(new Condition() {
+                                            @Override
+                                            public boolean active() {
+                                                return !Player.isMoving();
+                                            }
+                                        }, General.random(3000, 5000));
+                                    }
+                                }
+
+                            }
+                        }
+                    }
+                }
+
+
+                break;
+
+            case RUN_TO_30:
+                if (DaxWalker.walkTo(runtoarea.getRandomTile())) {
+                    Timing.waitCondition(new Condition() {
+                        @Override
+                        public boolean active() {
+                            return !Player.isMoving();
+                        }
+                    }, General.random(3000, 5000));
+                }
+
+
+                break;
+
+            case USE_BONES_ON_ALTAR:
+                currentlyPerformingAction = continuouslyAnimating();
+                RSObject[] altar = Objects.find(15, "Chaos altar");
+
+                if (!currentlyPerformingAction) {
+                    if (Combat.getWildernessLevel() >= 1) {
+                        if (Player.getPosition().distanceTo(altar[0]) <= 1) {
+                            useAltar();
+                            Timing.waitCondition(() -> {
+                                General.sleep(50);
+                                return !continuouslyAnimating();
+                            }, General.random(1200, 1700));
+                        } else {
+                            int random = General.random(1, 2);
+                            if (altar.length > 0 && altar[0].isOnScreen() && PathFinding.canReach(altar[0], true)) {
+                                if (random > 1) {
+                                    Walking.clickTileMS(altar1, "Walk here");
+                                    General.sleep(3000, 5000);
+                                } else {
+                                    Walking.clickTileMS(altar2, "Walk here");
+                                    General.sleep(3000, 5000);
+                                }
+                            } else {
+                                if (random > 1) {
+                                    if (DaxWalker.walkTo(altar1)) {
+                                        Timing.waitCondition(new Condition() {
+                                            @Override
+                                            public boolean active() {
+                                                return !Player.isMoving();
+                                            }
+                                        }, General.random(3000, 5000));
+                                    }
+                                } else {
+                                    if (DaxWalker.walkTo(altar2)) {
+                                        Timing.waitCondition(new Condition() {
+                                            @Override
+                                            public boolean active() {
+                                                return !Player.isMoving();
+                                            }
+                                        }, General.random(3000, 5000));
+                                    }
+                                }
+                            }
+
+
+                        }
+                    }
+
+                }
+
+
+                break;
+
+
+            case RESTOCK:
+
+
+                break;
+
+            case TELE_TO_GE:
+                if (Combat.getWildernessLevel() >= 30) {
+                    General.println("Wow .getwildernesslevel works");
+                    if (DaxWalker.walkTo(runtoarea.getRandomTile())) {
+                        Timing.waitCondition(new Condition() {
+                            @Override
+                            public boolean active() {
+                                return !Player.isMoving();
+                            }
+                        }, General.random(3000, 5000));
+                    }
+                } else {
+                    if (DaxWalker.walkTo(gearea.getRandomTile())) {
+                        Timing.waitCondition(new Condition() {
+                            @Override
+                            public boolean active() {
+                                return !Player.isMoving();
+                            }
+                        }, General.random(3000, 5000));
+                    }
+                }
+                break;
+
+
+            case ON_START:
+
+                if (!hasCheckedBank) {
+                    if (!Banking.isBankScreenOpen()) {
+                        if (Banking.openBank()) {
+                            Timing.waitCondition(new Condition() {
+                                @Override
+                                public boolean active() {
+                                    return !Banking.isBankScreenOpen();
+                                }
+                            }, General.random(2400, 5000));
+                        }
+
+                    } else {
+                        RSItem[] bones = Banking.find(args);
+                        if (bones.length > 0 && bones[0] != null) {
+                            Banking.depositAll();
+                            Timing.waitCondition(new Condition() {
+                                @Override
+                                public boolean active() {
+                                    return Inventory.getAll().length < 1;
+                                }
+                            }, General.random(2400, 5000));
+                            if (Banking.close()) {
+                                hasCheckedBank = true;
+                            }
+
+
+                        } else {
+                            continuerunning = false;
+                        }
+
+
+                    }
+                }
+
+
+                break;
+
+
+            case NEEDS_BONES:
+                if (isAtGE()) {
+                    if (Banking.isBankScreenOpen()) {
+                        RSItem[] bones = Banking.find(args);
+                        RSItem[] bonesinv = Inventory.find(args);
+                        if (bones.length > 0 && bones[0] != null) {
+                            if (Inventory.getAll().length > 0) {
+                                Banking.depositAll();
+                            }
+                            if (bonesinv.length < 1) {
+                                if (hasItemFilter("Ring of wealth (")) {
+                                    Banking.depositAll();
+                                    Timing.waitCondition(new Condition() {
+                                        @Override
+                                        public boolean active() {
+                                            return !hasItemFilter("Ring of wealth (");
+                                        }
+                                    }, General.random(1500, 2000));
+
+                                }
+                                Banking.withdraw(0, bones[0].getID());
+                                int boneID = bones[0].getID();
+                                Timing.waitCondition(new Condition() {
+                                    @Override
+                                    public boolean active() {
+                                        return Inventory.find(boneID).length > 0;
+                                    }
+                                }, General.random(1500, 2000));
+                            } else {
+                                Banking.close();
+                            }
+
+                        } else {
+                            General.println("Does not have bones in bank");
+                            continuerunning = false;
+
+                        }
+                    } else {
+                        Banking.openBank();
+                        Timing.waitCondition(new Condition() {
+                            @Override
+                            public boolean active() {
+                                return !Player.isMoving();
+                            }
+                        }, General.random(1500, 2000));
+                    }
+                } else {
+                    walkToGE();
+                }
+
+                break;
+
+
+            case DEPOSIT_COINS:
+
+                if (!Banking.isBankScreenOpen()) {
+                    Banking.openBank();
+                    Timing.waitCondition(new Condition() {
+                        @Override
+                        public boolean active() {
+                            return !Player.isMoving();
+                        }
+                    }, General.random(1500, 2000));
+                }
+                if (Banking.isBankScreenOpen()) {
+                    Banking.depositAll();
+                    General.sleep(1500, 2000);
+                }
+
+                break;
+
+            case NEEDS_amulet:
+                if (!Equipment.isEquipped(Filters.Items.nameContains("Burning amulet"))) {
+                    if (hasItemFilter("Burning amulet")) {
+                        if (Banking.isBankScreenOpen()) {
+                            Banking.close();
+                        } else {
+                            equipamulet();
+                        }
+
+                    } else {
+                        if (Inventory.isFull()) {
+                            Banking.depositAll();
+                        } else {
+                            withdrawamulet();
+                        }
+
+                    }
+                }
+
+
+                break;
+
+            case NEEDS_RING:
+                if (!Equipment.isEquipped(Filters.Items.nameContains("Ring of wealth ("))) {
+                    if (hasItemFilter("Ring of wealth (")) {
+                        if (Banking.isBankScreenOpen()) {
+                            Banking.close();
+                        } else {
+                            equipRing();
+                        }
+                    } else {
+                        if (Inventory.isFull()) {
+                            Banking.depositAll();
+                        } else {
+                            withdrawring();
+                        }
+
+                    }
+                }
+
+                break;
+
+
+        }
+        return 50;
+    }
+
+
+    private boolean equipRing() {
+        RSItem[] ring = Inventory.find(Filters.Items.nameContains("Ring of wealth ("));
+        if (ring.length > 0 && ring[0] != null) {
+            if (!GameTab.TABS.INVENTORY.isOpen()) {
+                GameTab.TABS.INVENTORY.open();
+                if (Clicking.click("Wear", ring[0])) {
+                    Timing.waitCondition(new Condition() {
+                        @Override
+                        public boolean active() {
+                            return !hasRingOfWealthEquipped();
+                        }
+                    }, General.random(3000, 5000));
+                }
+
+            } else {
+                if (Clicking.click("Wear", ring[0])) {
+                    Timing.waitCondition(new Condition() {
+                        @Override
+                        public boolean active() {
+                            return !hasRingOfWealthEquipped();
+                        }
+                    }, General.random(3000, 5000));
+                }
+            }
+        }
+        return true;
+    }
+
+    private boolean equipamulet() {
+        RSItem[] amulet = Inventory.find(Filters.Items.nameContains("Burning amulet"));
+        if (amulet.length > 0 && amulet[0] != null) {
+            if (!GameTab.TABS.INVENTORY.isOpen()) {
+                GameTab.TABS.INVENTORY.open();
+                if (Clicking.click("Wear", amulet[0])) {
+                    Timing.waitCondition(new Condition() {
+                        @Override
+                        public boolean active() {
+                            return !hasRingOfWealthEquipped();
+                        }
+                    }, General.random(3000, 5000));
+                }
+
+            } else {
+                if (Clicking.click("Wear", amulet[0])) {
+                    Timing.waitCondition(new Condition() {
+                        @Override
+                        public boolean active() {
+                            return !hasRingOfWealthEquipped();
+                        }
+                    }, General.random(3000, 5000));
+                }
+            }
+        }
+        return true;
+    }
+
+
+    public RSArea gearea = new RSArea(
+            new RSTile(3160, 3493, 0),
+            new RSTile(3169, 3486, 0)
+    );
+
+
+    private boolean hasRingOfWealthEquipped() {
+        return Equipment.isEquipped(Filters.Items.nameContains("Ring of wealth ("));
+    }
+
+    private boolean hasRingOfWealthInvy() {
+        return Inventory.find(Filters.Items.nameContains("Ring of wealth (")).length > 0;
+    }
+
+    private boolean hasBurningAmuletEquipped() {
+        return Equipment.isEquipped(Filters.Items.nameContains("Burning amulet("));
+    }
+
+    public enum State {
+        RUN_TO_30, RESTOCK, NEEDS_JEWELRY, ON_START, NEEDS_COINS, NEEDS_BONES, NEEDS_amulet, NEEDS_RING, RUN_TO_ALTAR, USE_BONES_ON_ALTAR, TELE_TO_GE, DEPOSIT_COINS
+    }
+
+    private boolean hasBones() {
+        return Inventory.find(args).length > 0 && Inventory.find(args)[0] != null;
+    }
+
+    private boolean isAtGE() {
+        return (Player.getPosition() == null || gearea == null) ? false : gearea.contains(Player.getPosition());
+    }
+
+    private boolean walkToGE() {
+        if (DaxWalker.walkTo(gearea.getRandomTile())) {
+            Timing.waitCondition(new Condition() {
+                @Override
+                public boolean active() {
+                    return !Player.isMoving();
+                }
+            }, General.random(3000, 5000));
+        }
+        return true;
+    }
+
+
+    private void daxStart() {
+        DaxWalker.setCredentials(new DaxCredentialsProvider() {
+            @Override
+            public DaxCredentials getDaxCredentials() {
+                return new DaxCredentials("sub_DPjcfqN4YkIxm8", "PUBLIC-KEY");
+            }
+        });
+    }
+
+
+    private boolean isNearAltar() {
+        RSObject[] altar = Objects.find(15, "Chaos altar");
+        return altar.length > 0 && altar[0] != null;
+    }
+
+
+}
