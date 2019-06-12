@@ -1,0 +1,347 @@
+package scripts.cannonClicker;
+
+import org.tribot.api.Clicking;
+import org.tribot.api.General;
+import org.tribot.api.Timing;
+import org.tribot.api.input.Mouse;
+import org.tribot.api.types.generic.Condition;
+import org.tribot.api2007.*;
+import org.tribot.api2007.ext.Filters;
+import org.tribot.api2007.types.*;
+import org.tribot.script.Script;
+import org.tribot.script.ScriptManifest;
+import org.tribot.script.interfaces.Painting;
+
+
+import java.awt.*;
+
+import java.text.NumberFormat;
+
+@ScriptManifest(authors = { "adamhackz" }, category = "Adamseries", name = "aCannonClicker", description = "i Click cannons wiv my wittle wittle mouse", version = (0.02) )
+
+
+public class main extends Script implements Painting {
+
+    private State scriptState;
+
+    private boolean continuerunning = true;
+    private boolean onstarthing = false;
+    private boolean cannon = false;
+    private RSTile cannonTile = null;
+
+    int startingXP = Skills.getXP(Skills.SKILLS.RANGED);
+    private final long START_TIME = System.currentTimeMillis();
+    String[] stopMessage = {"There isn't enough space to set up here"};
+    String currentState;
+
+
+
+
+    @Override
+    public void onPaint(Graphics g) {
+
+        NumberFormat.getInstance();
+        long runtime = System.currentTimeMillis() - START_TIME;
+
+        long dumbass = Skills.getXP(Skills.SKILLS.RANGED)-startingXP;
+
+        int distance = Player.getPosition().distanceTo(cannonTile);
+
+
+
+        //g.drawString("State: " + getState(), 5, 80);
+        g.drawString("Running for: " + Timing.msToString(runtime), 5, 80);
+        g.drawString("XP gained: " + (dumbass), 5, 100);
+        g.drawString("State: " + scriptState, 5, 120);
+        g.drawString("Distance from cannon" + distance, 5, 140);
+
+    }
+
+
+    private boolean onStart(){
+        return true;
+    }
+
+    @Override
+    public void run() {
+        if (onStart()) {
+            while (continuerunning) {
+                loop();
+
+
+            }
+        }
+    }
+
+
+
+    private int loop() {
+        scriptState = getState();
+        General.sleep(50);
+
+        switch (scriptState) {
+
+
+            case REPAIR_CANNON:
+
+                RSObject[] myCannonBroke = Objects.findNearest(5, "Broken multicannon");
+                if (myCannonBroke.length > 0 ){
+                    if (myCannonBroke[0].getDefinition().getActions()[0].contains("Repair")) {
+                        General.println("Needs to repair cannon");
+                        Clicking.click("Repair", myCannonBroke[0]);
+                        Timing.waitCondition(new org.tribot.api.types.generic.Condition() {
+                            @Override
+                            public boolean active() {
+                                General.sleep(100);
+                                return !myCannonBroke[0].getDefinition().getActions()[0].contains("Repair");
+                            }
+
+                        }, General.random(3000, 5000));
+                    }
+                }
+
+                break;
+            case RETURN:
+
+                if (cannonTile.isOnScreen() && cannonTile.isClickable()){
+                    General.println("Screen walking to cannon tile");
+                    Walking.clickTileMS(cannonTile, "Walk here");
+                    General.sleep(2000,3000);
+                } else {
+                    General.println("Walking to cannon tile");
+                    WebWalking.walkTo(cannonTile);
+                    General.sleep(2000,3000);
+                }
+
+                break;
+
+            case SETUP_CANNON:
+                if (hasCannon()){
+                    setupCannon();
+                }
+                if (!hasCannon()){
+                    RSObject[] myCannon = Objects.findNearest(5, "Dwarf multicannon");
+                    RSItem[] cannonballs = Inventory.find("Cannonball");
+                    if (myCannon.length > 0) {
+                        if (cannonTile == null){
+                            General.sleep(750,3000);
+                            Clicking.hover(myCannon[0]);
+                            General.sleep(2000,5000);
+                            Clicking.click("Walk here", myCannon[0]);
+                            General.sleep(3000,5000);
+                            cannonTile = Player.getPosition();
+                            cannon = true;
+
+                        }
+                    }
+                }
+
+
+
+                break;
+
+            case RELOAD_CANNON:
+
+                if (cannon){
+                    RSObject[] myCannon = Objects.findNearest(5, "Dwarf multicannon");
+
+                    RSItem[] cannonballs = Inventory.find("Cannonball");
+                    if (myCannon.length > 0){
+                        if (cannonballs.length > 0) {
+                            if (Player.getPosition().distanceTo(cannonTile) >= 1){
+                                Clicking.click("Walk here", cannonTile);
+                                General.sleep(4500, 7000);
+                            }
+                            if (myCannon[0].getDefinition().getActions()[0].contains("Fire")) {
+                                General.println("Needs to load cannon");
+                                Clicking.click("Fire", myCannon[0]);
+                                General.sleep(19000, 45000);
+                            }
+                        } else {
+                            General.println("We ran out of balls to shove in our tinsy winsy wittle cannon");
+                            Clicking.click("Pick-up", myCannon[0]);
+                            General.sleep(3000,5000);
+                            continuerunning = false;
+                        }
+
+                    }
+
+                }
+
+
+            case LOOT:
+
+                RSGroundItem[] lootlist = GroundItems.findNearest("Torstal seed", "Snapdragon seed", "Ranarr seed", "Long bone", "Curved bone");
+
+                if (Player.getPosition().distanceTo(cannonTile) >= 25){
+                    General.println("Walking to cannontile with webwalking");
+                    WebWalking.walkTo(cannonTile);
+
+                } else {
+                    if (lootlist.length > 0){
+                        if (Clicking.click("Take", lootlist[0])){
+                            General.println("Attempting to loot " + lootlist[0].getDefinition().getName());
+                            General.sleep(2000,3000);
+                            Timing.waitCondition(new org.tribot.api.types.generic.Condition() {
+                                @Override
+                                public boolean active() {
+                                    General.sleep(100);
+                                    return !Player.isMoving();
+                                }
+
+                            }, General.random(3000, 5000));
+                        }
+
+                    }
+                }
+
+                break;
+
+            case RUN_TO_GNOME:
+
+                General.println("We lost our cannon nigga, peace");
+                continuerunning = false;
+
+                break;
+
+
+
+
+
+        }
+        return 50;
+    }
+
+    private boolean hoverMenuOption(String option){
+        if(!ChooseOption.isOpen())
+            Mouse.click(3);
+        if(isHoveringOption(option)){
+            return true;
+        }
+        if(Timing.waitCondition(new Condition() {
+            @Override
+            public boolean active() {
+                return ChooseOption.isOpen();
+            }
+        }, General.random(1100, 1700))){
+            RSMenuNode[] nodes = ChooseOption.getMenuNodes();
+            if(nodes == null)
+                return false;
+            for(RSMenuNode node:nodes){
+                if(node.containsAction(option)){
+                    Rectangle r = node.getArea();
+                    if(!r.contains(Mouse.getPos())){
+                        Mouse.moveBox(r);
+                    }
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean isHoveringOption(String option){
+        RSMenuNode[] nodes = ChooseOption.getMenuNodes();
+        if(nodes == null)
+            return false;
+        boolean value = false;
+        for(RSMenuNode node:nodes){
+            if(node.containsAction(option)){
+                Rectangle area = node.getArea();
+                if(area != null && area.contains(Mouse.getPos())){
+                    value = true;
+                }
+            }
+        }
+        return value;
+    }
+
+    private boolean setupCannon(){
+        RSItem[] cannonbase = Inventory.find("Cannon base");
+        if (cannonbase.length > 0){
+            if (Clicking.click("Set-up", cannonbase[0])){
+                General.println("Setting up cannon");
+
+                return Timing.waitCondition(new org.tribot.api.types.generic.Condition() {
+                    @Override
+                    public boolean active() {
+                        General.sleep(100);
+                        return !hasItem("Cannon base");
+                    }
+
+                }, General.random(12000, 15000));
+
+            }
+        }
+
+        return true;
+    }
+
+
+
+
+
+
+    public enum State {
+        REPAIR_CANNON, RELOAD_CANNON, SETUP_CANNON,LOOT, RETURN, ELSE,RUN_TO_GNOME
+    }
+
+    private boolean hasCannon(){
+        return hasItem("Cannon base");
+    }
+
+
+    private State getState() {
+        RSGroundItem[] lootlist = GroundItems.findNearest("Torstal seed", "Snapdragon seed", "Ranarr seed", "Long bone", "Curved bone");
+        RSObject[] myCannonBroke = Objects.findNearest(5, "Broken multicannon");
+
+        if (!cannon){
+            return State.SETUP_CANNON;
+        } else {
+            if (lootlist.length > 0){
+                if (PathFinding.canReach(lootlist[0].getPosition(), false)){
+                    return State.LOOT;
+                } else {
+                    return State.ELSE;
+                }
+            } else {
+                if (Player.getPosition().distanceTo(cannonTile) >= 1){
+                    return State.RETURN;
+                }
+            }
+            if (Inventory.isFull()){
+                continuerunning = false;
+            }
+            if (myCannonBroke.length > 0){
+                return State.REPAIR_CANNON;
+            }
+        }
+        if (Inventory.isFull()){
+            continuerunning = false;
+        }
+        if (isCannonNear() && Player.getPosition().distanceTo(cannonTile) <= 1){
+            return State.RELOAD_CANNON;
+        }
+        else return State.ELSE;
+
+
+    }
+
+    private boolean isCannonNear(){
+        RSObject[] cannon = Objects.find(5, "Dwarf multicannon");
+        return cannon.length > 0 && Player.getPosition().distanceTo(cannon[0].getPosition()) < 5;
+    }
+
+
+
+
+    private boolean hasItem(String... ItemName){
+        RSItem[] items = Inventory.find(ItemName);
+        return items.length > 0;
+    }
+
+
+
+
+
+}
