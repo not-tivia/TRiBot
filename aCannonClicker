@@ -105,12 +105,30 @@ public class main extends Script implements Painting {
 
                 if (cannonTile.isOnScreen() && cannonTile.isClickable()){
                     General.println("Screen walking to cannon tile");
-                    Walking.clickTileMS(cannonTile, "Walk here");
-                    General.sleep(2000,3000);
+                    if (Walking.clickTileMS(cannonTile, "Walk here")){
+                        Timing.waitCondition(new org.tribot.api.types.generic.Condition() {
+                            @Override
+                            public boolean active() {
+                                General.sleep(100);
+                                return Player.getPosition().equals(cannonTile);
+                            }
+
+                        }, General.random(3000, 5000));
+                    }
+
                 } else {
                     General.println("Walking to cannon tile");
-                    WebWalking.walkTo(cannonTile);
-                    General.sleep(2000,3000);
+                    if (WebWalking.walkTo(cannonTile)){
+                        Timing.waitCondition(new org.tribot.api.types.generic.Condition() {
+                            @Override
+                            public boolean active() {
+                                General.sleep(100);
+                                return Player.getPosition().equals(cannonTile);
+                            }
+
+                        }, General.random(3000, 5000));
+                    }
+
                 }
 
                 break;
@@ -150,7 +168,14 @@ public class main extends Script implements Painting {
                         if (cannonballs.length > 0) {
                             if (Player.getPosition().distanceTo(cannonTile) >= 1){
                                 Clicking.click("Walk here", cannonTile);
-                                General.sleep(4500, 7000);
+                                Timing.waitCondition(new org.tribot.api.types.generic.Condition() {
+                                    @Override
+                                    public boolean active() {
+                                        General.sleep(100);
+                                        return Player.getPosition().equals(cannonTile);
+                                    }
+
+                                }, General.random(3000, 5000));
                             }
                             if (myCannon[0].getDefinition().getActions()[0].contains("Fire")) {
                                 General.println("Needs to load cannon");
@@ -159,8 +184,17 @@ public class main extends Script implements Painting {
                             }
                         } else {
                             General.println("We ran out of balls to shove in our tinsy winsy wittle cannon");
-                            Clicking.click("Pick-up", myCannon[0]);
-                            General.sleep(3000,5000);
+                            if (Clicking.click("Pick-up", myCannon[0])){
+                                Timing.waitCondition(new org.tribot.api.types.generic.Condition() {
+                                    @Override
+                                    public boolean active() {
+                                        General.sleep(100);
+                                        return myCannon.length < 1;
+                                    }
+
+                                }, General.random(3000, 5000));
+                            }
+
                             continuerunning = false;
                         }
 
