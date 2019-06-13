@@ -86,18 +86,17 @@ public class main extends Script implements Painting {
 
                 RSObject[] myCannonBroke = Objects.findNearest(5, "Broken multicannon");
                 if (myCannonBroke.length > 0 ){
-                    if (myCannonBroke[0].getDefinition().getActions()[0].contains("Repair")) {
-                        General.println("Needs to repair cannon");
-                        Clicking.click("Repair", myCannonBroke[0]);
+                    General.println("Needs to repair cannon");
+                    if (Clicking.click("Repair", myCannonBroke[0])){
                         Timing.waitCondition(new org.tribot.api.types.generic.Condition() {
-                            @Override
-                            public boolean active() {
-                                General.sleep(100);
-                                return !myCannonBroke[0].getDefinition().getActions()[0].contains("Repair");
-                            }
-
-                        }, General.random(3000, 5000));
+                                @Override
+                                public boolean active() {
+                                    General.sleep(100);
+                                    return myCannonBroke.length < 1;
+                                }
+                            }, General.random(3000, 5000));
                     }
+                        
                 }
 
                 break;
@@ -145,10 +144,12 @@ public class main extends Script implements Painting {
                             General.sleep(750,3000);
                             Clicking.hover(myCannon[0]);
                             General.sleep(2000,5000);
-                            Clicking.click("Walk here", myCannon[0]);
-                            General.sleep(3000,5000);
-                            cannonTile = Player.getPosition();
-                            cannon = true;
+                            if (Clicking.click("Walk here", myCannon[0])){
+                                General.sleep(3000,5000);
+                                cannonTile = Player.getPosition();
+                                cannon = true;
+                            }
+                            
 
                         }
                     }
@@ -167,20 +168,24 @@ public class main extends Script implements Painting {
                     if (myCannon.length > 0){
                         if (cannonballs.length > 0) {
                             if (Player.getPosition().distanceTo(cannonTile) >= 1){
-                                Clicking.click("Walk here", cannonTile);
-                                Timing.waitCondition(new org.tribot.api.types.generic.Condition() {
-                                    @Override
-                                    public boolean active() {
-                                        General.sleep(100);
-                                        return Player.getPosition().equals(cannonTile);
-                                    }
+                                if (Clicking.click("Walk here", cannonTile)){
+                                    Timing.waitCondition(new org.tribot.api.types.generic.Condition() {
+                                        @Override
+                                        public boolean active() {
+                                            General.sleep(100);
+                                            return Player.getPosition().equals(cannonTile);
+                                        }
 
-                                }, General.random(3000, 5000));
+                                    }, General.random(3000, 5000));
+                                }
+                               
                             }
                             if (myCannon[0].getDefinition().getActions()[0].contains("Fire")) {
                                 General.println("Needs to load cannon");
-                                Clicking.click("Fire", myCannon[0]);
-                                General.sleep(19000, 45000);
+                                if (Clicking.click("Fire", myCannon[0])){
+                                    General.sleep(19000, 45000);
+                                }
+                                
                             }
                         } else {
                             General.println("We ran out of balls to shove in our tinsy winsy wittle cannon");
@@ -209,7 +214,16 @@ public class main extends Script implements Painting {
 
                 if (Player.getPosition().distanceTo(cannonTile) >= 25){
                     General.println("Walking to cannontile with webwalking");
-                    WebWalking.walkTo(cannonTile);
+                    if (WebWalking.walkTo(cannonTile)){
+                        Timing.waitCondition(new org.tribot.api.types.generic.Condition() {
+                            @Override
+                            public boolean active() {
+                                General.sleep(100);
+                                return !Player.isMoving();
+                            }
+
+                        }, General.random(3000, 5000));
+                    }
 
                 } else {
                     if (lootlist.length > 0){
@@ -233,7 +247,7 @@ public class main extends Script implements Painting {
 
             case RUN_TO_GNOME:
 
-                General.println("We lost our cannon nigga, peace");
+                General.println("We lost our cannon");
                 continuerunning = false;
 
                 break;
@@ -293,9 +307,8 @@ public class main extends Script implements Painting {
     private boolean setupCannon(){
         RSItem[] cannonbase = Inventory.find("Cannon base");
         if (cannonbase.length > 0){
+            General.println("Setting up cannon");
             if (Clicking.click("Set-up", cannonbase[0])){
-                General.println("Setting up cannon");
-
                 return Timing.waitCondition(new org.tribot.api.types.generic.Condition() {
                     @Override
                     public boolean active() {
@@ -304,7 +317,7 @@ public class main extends Script implements Painting {
                     }
 
                 }, General.random(12000, 15000));
-
+                
             }
         }
 
