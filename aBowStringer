@@ -1,0 +1,423 @@
+package scripts.aBowStringer;
+
+import org.tribot.api.Clicking;
+import org.tribot.api.DynamicClicking;
+import org.tribot.api.General;
+import org.tribot.api.Timing;
+import org.tribot.api.input.Keyboard;
+import org.tribot.api.types.generic.Condition;
+import org.tribot.api2007.*;
+import org.tribot.api2007.ext.Filters;
+import org.tribot.api2007.types.*;
+import org.tribot.script.Script;
+import org.tribot.script.ScriptManifest;
+import org.tribot.script.interfaces.Painting;
+import scripts.aBowStringer.dax_api.api_lib.DaxWalker;
+import scripts.aBowStringer.dax_api.api_lib.models.DaxCredentials;
+import scripts.aBowStringer.dax_api.api_lib.models.DaxCredentialsProvider;
+import scripts.aBowStringer.dax_api.api_lib.models.RunescapeBank;
+import scripts.aBowStringer.other_api.entityselector.Entities;
+import scripts.aBowStringer.other_api.entityselector.finders.prefabs.InterfaceEntity;
+import scripts.aBowStringer.other_api.entityselector.finders.prefabs.ObjectEntity;
+
+import java.awt.*;
+import java.text.NumberFormat;
+
+
+@ScriptManifest(authors = { "adamhackz" }, category = "Crafting", name = "aBowStringer", description = "Simple bowstringer" , version = (1) )
+
+
+public class main extends Script implements Painting {
+    private State scriptState = getState();
+
+    private boolean continueRunning = true;
+    private boolean onstarthing = false;
+    private boolean currentlyPerformingAction = false;
+    static final RSTile spinner = new RSTile(3209, 3213, 1);
+
+    private final long START_TIME = System.currentTimeMillis();
+    String currentResource;
+    String currentFinishedItem;
+
+
+
+
+
+
+    @Override
+    public void run() {
+        daxStart();
+            while (continueRunning) {
+                loop();
+            }
+
+    }
+
+    @Override
+    public void onPaint(Graphics g) {
+        NumberFormat.getInstance();
+
+        long runtime = System.currentTimeMillis() - START_TIME;
+
+        //long dumbass = Skills.getXP(Skills.SKILLS.CONSTRUCTION)-startingXP;
+
+        g.drawString("Running for: " + Timing.msToString(runtime), 5, 80);
+        g.drawString("State: " + scriptState, 5, 100);
+        g.drawString("Resource " + currentResource, 5, 120);
+        g.drawString("Finished product " + currentFinishedItem, 5, 140);
+
+        //g.drawString("XP gained: " + formatValue(dumbass), 5, 100);
+
+
+
+    }
+
+    private void daxStart() {
+        scripts.aBowStringer.dax_api.api_lib.DaxWalker.setCredentials(new DaxCredentialsProvider() {
+            @Override
+            public DaxCredentials getDaxCredentials() {
+                return new DaxCredentials("sub_DPjXXzL5DeSiPf", "PUBLIC-KEY");
+            }
+        });
+    }
+
+    private int loop() {
+        scriptState = getState();
+        General.sleep(50);
+
+        switch (scriptState) {
+            case OPEN_BANK:
+                Banking.openBank();
+
+                break;
+
+
+            //General.println(Combat.getSelectedStyleIndex());
+
+
+            case WITHDRAW:
+                if (Banking.isBankScreenOpen()) {
+                    if (Inventory.getAll().length < 1) {
+                        if (bankHasItem(currentResource)) {
+                            Banking.withdraw(0, currentResource);
+                            Timing.waitCondition(new Condition() {
+                                @Override
+                                public boolean active() {
+                                    General.sleep(100);
+                                    return hasItem(currentResource);
+                                }
+
+                            }, General.random(1100, 2400));
+                        } else {
+                            General.println("Out of shit");
+                            continueRunning = false;
+                        }
+                    } else {
+                        Banking.depositAll();
+                    }
+
+                } else {
+                    Banking.openBank();
+                }
+
+                break;
+
+            case WALK_TO_BANK:
+                DaxWalker.walkToBank(RunescapeBank.LUMBRIDGE_TOP);
+
+                break;
+
+            case DEPOSIT:
+                if (isAtBank()){
+                    if (Banking.isBankScreenOpen()){
+                        Banking.depositAll();
+                    } else {
+                        if (Banking.openBank()){
+                            Timing.waitCondition(new Condition() {
+                                @Override
+                                public boolean active() {
+                                    General.sleep(100);
+                                    return Banking.isBankScreenOpen();
+                                }
+
+                            }, General.random(1100, 2400));
+                        }
+                    }
+                } else {
+                    DaxWalker.walkToBank();
+                }
+
+
+                break;
+
+            case ANIMATING:
+
+                break;
+
+
+            case USE_WHEEL:
+                clickOnWheel();
+
+                break;
+
+
+            case WALK_TO_WHEEL:
+                if (spinner.isOnScreen() && spinner.isClickable()){
+                    if (!Player.isMoving() || Player.getPosition().equals(spinner)){
+                        Walking.clickTileMS(spinner, "Walk here");
+                        Timing.waitCondition(new Condition() {
+                            @Override
+                            public boolean active() {
+                                General.sleep(100);
+                                return !Player.isMoving();
+                            }
+
+                        }, General.random(1100, 2400));
+                    }
+                } else {
+                    DaxWalker.walkTo(spinner.getPosition());
+                }
+
+
+
+
+                break;
+
+        }
+        return 50;
+    }
+
+
+
+    public enum State {
+        DEPOSIT, ANIMATING, WITHDRAW, WALK_TO_BANK, WALK_TO_WHEEL, USE_WHEEL, OPEN_BANK, IDLE;
+    }
+
+    private State getState() {
+        RSObject spinner = Entities.find(ObjectEntity::new)
+                .actionsEquals("Spin")
+                .sortByDistance()
+                .getFirstResult();
+
+        if (Skills.getCurrentLevel(Skills.SKILLS.CRAFTING) < CraftingItem.BOWSTRING.requiredLevel) {
+            currentResource = CraftingItem.BALLOFWOOL.resourceName;
+            currentFinishedItem = CraftingItem.BALLOFWOOL.finishedName;
+        } else {
+            currentResource = CraftingItem.BOWSTRING.resourceName;
+            currentFinishedItem = CraftingItem.BOWSTRING.finishedName;
+        }
+
+
+        if (isAtBank()) {
+            if (Banking.isBankScreenOpen()) {
+                if (hasItem(currentResource)) {
+                    if (hasItem(currentFinishedItem)) {
+                        return State.DEPOSIT;
+                    } else {
+                        return State.WALK_TO_WHEEL;
+                    }
+                } else {
+                    if (bankHasItem(currentResource)) {
+                        return State.WITHDRAW;
+                    } else {
+                        // Change this later to end script or restock
+                        return State.ANIMATING;
+                    }
+                }
+            } else {
+                if (hasItem(currentResource)) {
+                    return State.WALK_TO_WHEEL;
+                } else {
+                    if (hasItem(currentFinishedItem)) {
+                        return State.DEPOSIT;
+                    } else {
+                        if (!hasItem(currentResource) && !hasItem(currentFinishedItem)){
+                            return State.WITHDRAW;
+                        }
+                    }
+                }
+
+            }
+        } else {
+            if (hasItem(currentResource)) {
+                if (spinner!=null && spinner.isOnScreen()) {
+                    if (continuouslyAnimating()) {
+                            return State.ANIMATING;
+                    } else {
+                        if (hasItem(currentResource)){
+                            return State.USE_WHEEL;
+                        } else {
+                            return State.IDLE;
+                        }
+
+                    }
+                } else {
+                    return State.WALK_TO_WHEEL;
+                }
+            } else {
+                if (hasItem(currentFinishedItem)) {
+                    if (continuouslyAnimating()) {
+                        return State.ANIMATING;
+                    } else {
+                        return State.DEPOSIT;
+                    }
+                } else {
+                    return State.DEPOSIT;
+                }
+            }
+        }
+        return State.IDLE;
+    }
+
+
+
+
+
+
+        public enum CraftingItem {
+
+            BOWSTRING("Flax", "Bow String", 10),
+            BALLOFWOOL("Wool", "Ball of Wool", 1);
+
+            final String resourceName;
+            final String finishedName;
+            final int requiredLevel;
+
+            static final CraftingItem[] CraftingItem = {BOWSTRING, BALLOFWOOL};
+
+            CraftingItem(String resourceName, String finishedName, int requiredLevel) {
+                this.resourceName = resourceName;
+                this.finishedName = finishedName;
+                this.requiredLevel = requiredLevel;
+            }
+
+            private String getResourceName() {
+                return resourceName;
+            }
+
+            private String getFinalName() {
+                return finishedName;
+            }
+
+            private int getRequiredLevel() {
+                return requiredLevel;
+            }
+
+        }
+
+
+        private boolean hasItemFilter (String...ItemName){
+            RSItem[] items = Inventory.find(Filters.Items.nameContains(ItemName));
+            return items.length > 0 && items[0]!=null;
+        }
+
+        private boolean bankHasItemFilter (String...ItemName){
+            RSItem[] items = Banking.find(Filters.Items.nameContains(ItemName));
+            return items.length > 0 && items[0]!=null;
+        }
+
+
+        private boolean hasItem (String...ItemName){
+            RSItem[] items = Inventory.find(ItemName);
+            return items.length > 0 && items[0]!=null;
+        }
+
+        private boolean bankHasItem (String...ItemName){
+            RSItem[] items = Banking.find(ItemName);
+            return items.length > 0 && items[0]!=null;
+        }
+
+
+        private boolean isAtBank () {
+            RSObject[] bank = Objects.findNearest(15, "Bank booth", "Bank chest", "Banker");
+            return bank.length > 0 && bank[0] != null;
+        }
+
+
+
+        private boolean isAtGE () {
+            return geArea.contains(Player.getPosition());
+        }
+
+        public static RSArea geArea = new RSArea(
+                new RSTile(3160, 3493, 0),
+                new RSTile(3169, 3486, 0)
+        );
+
+
+        private boolean walkToGE () {
+            return DaxWalker.walkTo(geArea.getRandomTile());
+        }
+
+
+        private boolean clickOnWheel () {
+            
+
+            RSObject spinner = Entities.find(ObjectEntity::new)
+
+                    .actionsEquals("Spin")
+                    .sortByDistance()
+                    .getFirstResult();
+
+            RSInterface bowstring = Entities.find(InterfaceEntity::new)
+                    .inMaster(270)
+                    .componentNameContains("Bow String")
+                    .getFirstResult();
+
+            RSInterface ballofwool = Entities.find(InterfaceEntity::new)
+                    .inMaster(270)
+                    .componentNameContains("Ball of Wool")
+                    .getFirstResult();
+
+            if (spinner!=null){
+                if (bowstring == null){
+                    if (Clicking.click("Spin",spinner)){
+                        Timing.waitCondition(new Condition() {
+                            @Override
+                            public boolean active() {
+                                return bowstring != null;
+                            }
+                        }, General.random(900, 1600));
+                    }
+                } else {
+                    if (currentResource == "Flax") {
+                        if (Clicking.click(bowstring)) {
+                            Timing.waitCondition(new Condition() {
+                                @Override
+                                public boolean active() {
+                                    return !continuouslyAnimating();
+                                }
+                            }, General.random(1600, 2000));
+                        }
+                    } else {
+                        if (currentResource == "Wool"){
+                            if (Clicking.click(ballofwool)) {
+                                Timing.waitCondition(new Condition() {
+                                    @Override
+                                    public boolean active() {
+                                        return !continuouslyAnimating();
+                                    }
+                                }, General.random(1600, 2000));
+                            }
+                        }
+                    }
+                }
+            }
+            return true;
+        }
+
+        public static boolean continuouslyAnimating () {
+            return Timing.waitCondition(new Condition() {
+                @Override
+                public boolean active() {
+                    return Player.getAnimation() != -1;
+                }
+            }, General.random(2000, 3000));
+
+        }
+
+}
+
+
+
+
