@@ -99,15 +99,16 @@ public class main extends Script implements Painting {
                 if (Banking.isBankScreenOpen()) {
                     if (Inventory.getAll().length < 1) {
                         if (bankHasItem(currentResource)) {
-                            Banking.withdraw(0, currentResource);
-                            Timing.waitCondition(new Condition() {
-                                @Override
-                                public boolean active() {
-                                    General.sleep(100);
-                                    return hasItem(currentResource);
-                                }
+                            if (Banking.withdraw(0, currentResource)) {
+                                Timing.waitCondition(new Condition() {
+                                    @Override
+                                    public boolean active() {
+                                        General.sleep(100);
+                                        return hasItem(currentResource);
+                                    }
 
-                            }, General.random(1100, 2400));
+                                }, General.random(1100, 2400));
+                            }
                         } else {
                             General.println("Out of shit");
                             continueRunning = false;
@@ -163,16 +164,17 @@ public class main extends Script implements Painting {
 
             case WALK_TO_WHEEL:
                 if (spinner.isOnScreen() && spinner.isClickable()){
-                    if (!Player.isMoving() || Player.getPosition().equals(spinner)){
-                        Walking.clickTileMS(spinner, "Walk here");
-                        Timing.waitCondition(new Condition() {
-                            @Override
-                            public boolean active() {
-                                General.sleep(100);
-                                return !Player.isMoving();
-                            }
+                    if (!Player.isMoving() || Player.getPosition().equals(spinner)) {
+                        if (Walking.clickTileMS(spinner, "Walk here")) {
+                            Timing.waitCondition(new Condition() {
+                                @Override
+                                public boolean active() {
+                                    General.sleep(100);
+                                    return !Player.isMoving();
+                                }
 
-                        }, General.random(1100, 2400));
+                            }, General.random(1100, 2400));
+                        }
                     }
                 } else {
                     DaxWalker.walkTo(spinner.getPosition());
