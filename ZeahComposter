@@ -1,0 +1,326 @@
+package scripts.aComposter;
+
+import org.tribot.api.Clicking;
+import org.tribot.api.DynamicClicking;
+import org.tribot.api.General;
+import org.tribot.api.Timing;
+import org.tribot.api.input.Mouse;
+import org.tribot.api.types.generic.Condition;
+import org.tribot.api.types.generic.Filter;
+import org.tribot.api.util.abc.ABCUtil;
+import org.tribot.api2007.*;
+import org.tribot.api2007.ext.Filters;
+import org.tribot.api2007.types.*;
+import org.tribot.script.Script;
+import org.tribot.script.ScriptManifest;
+import org.tribot.script.interfaces.Painting;
+
+import java.awt.*;
+import java.text.NumberFormat;
+import java.util.Arrays;
+import java.util.Comparator;
+
+@ScriptManifest(authors = "adamhackz", name = "Zeah Favor", category = "Tools", version = 0.1, description = "Only supports combining saltpetre and compost atm")
+
+
+public class main extends Script implements Painting{
+    private State scriptState = getState();
+    private final long START_TIME = System.currentTimeMillis();
+    private boolean continuerunning = true;
+
+
+    @Override
+    public void onPaint(Graphics g) {
+        NumberFormat.getInstance();
+        long runtime = System.currentTimeMillis() - START_TIME;
+        g.drawString("Running for: " + Timing.msToString(runtime), 5, 80);
+        g.drawString("State: " + scriptState, 5, 120);
+    }
+    
+
+@Override
+    public void run() {
+        while (continuerunning) {
+            loop();
+        }
+    }
+
+
+    private int loop() {
+        performTimedActions();
+        scriptState = getState();
+        General.println(scriptState);
+        switch (scriptState) {
+
+            case DEPOSIT:
+                if (!Banking.isBankScreenOpen()){
+                    if (Banking.openBank()){
+                        Timing.waitCondition(new Condition() {
+                            @Override
+                            public boolean active() {
+                                return Banking.isBankScreenOpen();
+                            }
+                        }, General.random(2000, 3000));
+                    }
+                } else {
+                    if (hasItem("Sulphurous fertiliser")){
+                        Banking.depositAll();
+                        Timing.waitCondition(new Condition() {
+                            @Override
+                            public boolean active() {
+                                return !hasItem("Sulphurous fertiliser");
+                            }
+                        }, General.random(2000, 3000));
+                    }
+                }
+
+                break;
+
+            case WITHDRAW:
+                if (Banking.isBankScreenOpen()) {
+                    if (hasItem("Sulphurous fertiliser")) {
+                        Banking.depositAll();
+                        Timing.waitCondition(new Condition() {
+                            @Override
+                            public boolean active() {
+                                return !hasItem("Sulphurous fertiliser");
+                            }
+                        }, General.random(2000, 3000));
+                    } else {
+                        if (bankHasItem("Saltpetre")) {
+                            Banking.withdraw(14, "Saltpetre");
+                            Timing.waitCondition(new Condition() {
+                                @Override
+                                public boolean active() {
+                                    return hasItem("Saltpetre");
+                                }
+                            }, General.random(2000, 3000));
+                        } else {
+                            continuerunning = false;
+                        }
+                        if (bankHasItem("Compost")) {
+                            Banking.withdraw(14, "Compost");
+                            Timing.waitCondition(new Condition() {
+                                @Override
+                                public boolean active() {
+                                    return hasItem("Compost");
+                                }
+                            }, General.random(2000, 3000));
+                        } else {
+                            continuerunning = false;
+                        }
+                        if (hasItem("Saltpetre") && hasItem("Compost")){
+                            if (Banking.close()){
+                               //
+                            }
+                        }
+                    }
+
+                } else {
+                    if (!Banking.isBankScreenOpen()){
+                        if (Banking.openBank()){
+                            Timing.waitCondition(new Condition() {
+                                @Override
+                                public boolean active() {
+                                    return Banking.isBankScreenOpen();
+                                }
+                            }, General.random(2000, 3000));
+                        }
+                    }
+                }
+
+                break;
+
+            case ANIMATING:
+                General.println("We should be combining products");
+                break;
+
+            case COMBINING_ITEMS:
+                combine();
+                break;
+        }
+        return 50;
+    }
+
+    public enum State {
+
+        DEPOSIT, WITHDRAW, COMBINING_ITEMS,
+        ANIMATING
+    }
+
+
+    private State getState() {
+        if (Banking.isBankScreenOpen()){
+            if (hasItem("Sulphurous fertiliser")){
+                return State.DEPOSIT;
+            } else {
+                return State.WITHDRAW;
+            }
+        } else {
+            if (hasItem("Sulphurous fertiliser")) {
+                if (hasItem("Saltpetre") && hasItem("Compost")) {
+                    if (isCurrentlyGainingXP()) {
+                        return State.ANIMATING;
+                    } else {
+                        return State.COMBINING_ITEMS;
+                    }
+                } else {
+                    return State.DEPOSIT;
+                }
+            } else {
+                if (hasItem("Saltpetre") && hasItem("Compost")) {
+                    if (isCurrentlyGainingXP()) {
+                        return State.ANIMATING;
+                    } else {
+                        return State.COMBINING_ITEMS;
+                    }
+                } else {
+                    return State.WITHDRAW;
+                }
+            }
+        }
+    }
+
+
+    private static Point getCenterPoint(RSItem i) {
+        Rectangle r = i.getArea();
+        if (r != null) {
+            Point rPoint = r.getLocation();
+            return new Point(rPoint.x + r.width / 2, rPoint.y + r.height / 2);
+        }
+        return null;
+    }
+
+    private static Comparator<RSItem> closestToFarthest = (o1, o2) -> {
+        Point botMousePoint = new Point(Mouse.getPos());
+        Point p1 = getCenterPoint(o1);
+        Point p2 = getCenterPoint(o2);
+        if (p1 != null && p2 != null) {
+            return Integer.compare((int) botMousePoint.distance(p1), (int) botMousePoint.distance(p2)) > 0 ? 1 : -1;
+        }
+        return -1;
+    };
+
+    public static RSItem[] findNearestToMouse(String... names) {
+        RSItem[] items = Inventory.find(names);
+        Arrays.sort(items, closestToFarthest);
+        return items;
+    }
+
+
+
+
+    private boolean combine(){
+        RSItem[] compost = Inventory.find("Compost");
+        RSItem[] salt = Inventory.find("Saltpetre");
+        if (compost.length > 0 && salt.length > 0){
+            return findNearestToMouse("Compost")[0].click() && findNearestToMouse("Saltpetre")[0].click();
+        }
+        //return compost[0].click() && salt[0].click();
+        return false;
+
+    }
+
+
+    private static void examinePlayer(){
+        RSPlayer[] players = Players.getAll(new Filter<RSPlayer>() {
+            @Override
+            public boolean accept(RSPlayer rsPlayer) {
+                if (rsPlayer != null && rsPlayer.getName() != null &&rsPlayer.getModel() != null)
+                    return rsPlayer.isOnScreen();
+                return false;
+            }
+        });
+        if (players != null && players.length > 0){
+            Camera.turnToTile(players[0]);
+            if (players[0].isClickable()){
+                Clicking.hover(players[0]);
+                General.sleep(120, 1300);
+                Mouse.click(3);
+                General.sleep(120, 1300);
+
+            }
+        }
+
+    }
+
+
+    private boolean hasItem (String...ItemName){
+        RSItem[] items = Inventory.find(ItemName);
+        return items.length > 0 && items[0]!=null;
+    }
+
+    private boolean bankHasItem (String...ItemName){
+        RSItem[] items = Banking.find(ItemName);
+        return items.length > 0 && items[0]!=null;
+    }
+
+
+    private boolean isCurrentlyGainingXP(){
+        int startXp = Skills.getXP(Skills.SKILLS.FARMING);
+        long t = System.currentTimeMillis();
+        RSItem[] invItems = Inventory.getAll();
+        while(Timing.timeFromMark(t) < General.random(3400,4700)) {
+            if (invItems.length > Inventory.getAll().length || Skills.getXP(Skills.SKILLS.FARMING) > startXp) {
+                return true;
+            }
+            sleep(100);
+        }
+
+        return false;
+    }
+
+    // this is an instanced class you can use throughout the whole script.
+    private ABCUtil abcInstance = new ABCUtil();
+
+    // vars
+    private boolean shouldHover, shouldOpenMenu = false;
+
+    // This method will set some booleans for if you should hover, or right click hover the next target. Call it when you want to ask "Should I hover my next target?"
+    public void setHoverAndMenuOpenBooleans() {
+        this.shouldHover = abcInstance.shouldHover();
+        this.shouldOpenMenu= abcInstance.shouldOpenMenu();
+    }
+
+    // this will be called when you want to hover the next target. Always call this Anytime you might want to hover the next target. The above method will determine if you // do or not
+    public void executeHoverOrMenuOpen(RSObject target) {
+        if (Mouse.isInBounds() && this.shouldHover) {
+            Clicking.hover(target);
+            if (this.shouldOpenMenu)
+                if (!ChooseOption.isOpen())
+                    DynamicClicking.clickRSObject(target, 3);
+        }
+    }
+
+    // As an extra, when your player just sits still, you want to be calling this:
+    public void performTimedActions() {
+
+        if (abcInstance.shouldCheckTabs())
+            abcInstance.checkTabs();
+
+        if (abcInstance.shouldCheckXP()) {
+            abcInstance.checkXP();
+            General.sleep(General.randomSD(750, 1500, 1000, 150)); // sleep makes sure it checks xp longer.
+        }
+
+        if (abcInstance.shouldExamineEntity())
+        examinePlayer();
+
+        if (abcInstance.shouldMoveMouse())
+            abcInstance.moveMouse();
+
+        if (abcInstance.shouldPickupMouse())
+            abcInstance.pickupMouse();
+
+        if (abcInstance.shouldRightClick())
+        abcInstance.rightClick();
+
+        if (abcInstance.shouldRotateCamera())
+            abcInstance.rotateCamera();
+
+
+        if (abcInstance.shouldLeaveGame())
+            abcInstance.leaveGame();
+
+    }
+}
