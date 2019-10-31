@@ -1,5 +1,6 @@
 package scripts.aBowStringer;
 
+import org.tribot.TRiBot;
 import org.tribot.api.Clicking;
 
 import org.tribot.api.General;
@@ -7,161 +8,125 @@ import org.tribot.api.Timing;
 
 import org.tribot.api.input.Mouse;
 import org.tribot.api.types.generic.Condition;
+import org.tribot.api.util.abc.ABCProperties;
+import org.tribot.api.util.abc.ABCUtil;
 import org.tribot.api2007.*;
 import org.tribot.api2007.ext.Filters;
 import org.tribot.api2007.types.*;
 import org.tribot.script.Script;
 import org.tribot.script.ScriptManifest;
+import org.tribot.script.interfaces.Arguments;
 import org.tribot.script.interfaces.Painting;
-import scripts.aRunecrafter.dax_api.api_lib.DaxWalker;
-import scripts.aRunecrafter.dax_api.api_lib.models.DaxCredentials;
-import scripts.aRunecrafter.dax_api.api_lib.models.DaxCredentialsProvider;
-import scripts.aRunecrafter.dax_api.api_lib.models.RunescapeBank;
 
 import scripts.aBowStringer.other_api.entityselector.Entities;
 import scripts.aBowStringer.other_api.entityselector.finders.prefabs.InterfaceEntity;
 import scripts.aBowStringer.other_api.entityselector.finders.prefabs.ObjectEntity;
+import scripts.dax_api.api_lib.DaxWalker;
+import scripts.dax_api.api_lib.models.DaxCredentials;
+import scripts.dax_api.api_lib.models.DaxCredentialsProvider;
+import scripts.dax_api.api_lib.models.RunescapeBank;
 
 import java.awt.*;
 import java.text.NumberFormat;
+import java.util.HashMap;
 
 
 @ScriptManifest(authors = { "adamhackz" }, category = "Crafting", name = "aBowStringer", description = "Simple bowstringer" , version = (1) )
 
 
-public class Main extends Script implements Painting {
+public class Main extends Script implements Painting, Arguments {
+
+    String args;
     private State scriptState = getState();
 
     private boolean continueRunning = true;
-    private static final RSTile spinner = new RSTile(3209, 3213, 1);
+    private static final RSTile SPINNER_TILE = new RSTile(3209, 3213, 1);
 
     private final long START_TIME = System.currentTimeMillis();
     private String currentResource;
     private String currentFinishedItem;
-    private int flaxCount = 0;
 
-    private boolean hasBankedOnStart = false;
-    private boolean needsFlax = false;
-
-
-
+    private int xpOnStart = Skills.getXP(Skills.SKILLS.CRAFTING);
 
 
     @Override
-    public void run() {
-        daxStart();
-            while (continueRunning) {
-
-                loop();
-            }
-
-    }
-
-    @Override
-    public void onPaint(Graphics g) {
-        NumberFormat.getInstance();
-
-        long runtime = System.currentTimeMillis() - START_TIME;
-
-        //long dumbass = Skills.getXP(Skills.SKILLS.CONSTRUCTION)-startingXP;
-
-        g.drawString("Running for: " + Timing.msToString(runtime), 5, 80);
-        g.drawString("State: " + scriptState, 5, 100);
-        g.drawString("Resource " + currentResource, 5, 120);
-        g.drawString("Finished product " + currentFinishedItem, 5, 140);
-
-        //g.drawString("XP gained: " + formatValue(dumbass), 5, 100);
-
-
-
-    }
-
-    private int run_at = 20;
-
-    private void runCheck(){
-
-        if (!Game.isRunOn() && Game.getRunEnergy() >= run_at) {
-            Options.setRunOn(true);
-            run_at = General.random(25,100);
-            General.sleep(100);
+    public void passArguments(HashMap<String, String> hashMap) {
+        if (hashMap.containsKey("custom_input")) {
+            args = hashMap.get("custom_input");
+        } else if (hashMap.containsKey("autostart")) {
+            args = hashMap.get("autostart");
         }
     }
-
-    private boolean checkBankOnStart(){
-        if (hasBankedOnStart){
-            return false;
-        }
-        if (!hasBankedOnStart){
-            if (isAtBank()){
-                if (Banking.isBankScreenOpen()){
-                     if (flaxCount == 0){
-                         needsFlax = true;
-                     } else {
-                         hasBankedOnStart = true;
-                     }
-                } else {
-                    if (Banking.openBank()){
-                        Timing.waitCondition(new Condition() {
-                            @Override
-                            public boolean active() {
-                                General.sleep(100);
-                                return Banking.isBankScreenOpen();
-                            }
-
-                        }, General.random(1100, 2400));
-                    }
-                }
-            } else {
-                DaxWalker.walkToBank();
-            }
-
-        }
-        return true;
-    }
-
-
-
-
-
 
     private void daxStart() {
-        scripts.aRunecrafter.dax_api.api_lib.DaxWalker.setCredentials(new DaxCredentialsProvider() {
+        DaxWalker.setCredentials(new DaxCredentialsProvider() {
             @Override
             public DaxCredentials getDaxCredentials() {
                 return new DaxCredentials("sub_DPjXXzL5DeSiPf", "PUBLIC-KEY");
             }
         });
-
         Mouse.setSpeed(General.random(240,360));
+    }
+
+    private boolean onStart(){
+        //Hello fellas
+
+       return true;
+    }
+
+    @Override
+    public void run() {
+        if (onStart()){
+            while (continueRunning) {
+                loop();
+            }
+        }
+    }
+
+    @Override
+    public void onPaint(Graphics g) {
+        NumberFormat.getInstance();
+        long runtime = System.currentTimeMillis() - START_TIME;
+        int xpGained = Skills.getXP(Skills.SKILLS.CRAFTING) - xpOnStart;
+        int BowStrings = xpGained / 15;
+        int BowStringsPerHour = (int) (BowStrings * 3600000d / runtime);
+
+        g.drawString("Running for: " + Timing.msToString(runtime), 5, 80);
+        g.drawString("State: " + scriptState, 5, 100);
+        g.drawString("Resource " + currentResource, 5, 120);
+        g.drawString("Finished product " + currentFinishedItem, 5, 140);
+        g.drawString("Bowstrings made: " + BowStrings + " (" + BowStringsPerHour + "/h)", 5, 160);
+
+        g.drawString("Run %" + run_at, 5, 180);
+
+    }
+
+    // this is an instanced class you can use throughout the whole script.
+    private ABCUtil abcInstance = new ABCUtil();
+
+    private int run_at = abcInstance.generateRunActivation();
+
+    private void runCheck(){
+        if (!Game.isRunOn() && Game.getRunEnergy() >= run_at) {
+            if (Options.setRunOn(true)){
+                Timing.waitCondition(() -> Options.isRunEnabled(), General.random(600, 1100));
+                run_at = abcInstance.generateRunActivation();
+            }
+        }
     }
 
     private int loop() {
         scriptState = getState();
         General.sleep(50);
-        runCheck();
 
         switch (scriptState) {
-            case OPEN_BANK:
-                Banking.openBank();
-
-
-                break;
-
-
-
             case WITHDRAW:
                 if (Banking.isBankScreenOpen()) {
                     if (Inventory.getAll().length < 1) {
                         if (bankHasItem(currentResource)) {
                             if (Banking.withdraw(0, currentResource)) {
-                                Timing.waitCondition(new Condition() {
-                                    @Override
-                                    public boolean active() {
-                                        General.sleep(100);
-                                        return hasItem(currentResource);
-                                    }
+                                Timing.waitCondition(() -> hasItem(currentResource), General.random(600, 1100));
 
-                                }, General.random(1100, 2400));
                             }
                         } else {
                             General.println("Out of shit");
@@ -169,16 +134,23 @@ public class Main extends Script implements Painting {
                         }
                     } else {
                         Banking.depositAll();
+                        Timing.waitCondition(() -> Inventory.getAll().length < 1, General.random(600, 1100));
+
                     }
 
                 } else {
-                    Banking.openBank();
+                    if (Banking.openBank()){
+                        Timing.waitCondition(() -> Banking.isBankScreenOpen(), General.random(600, 1100));
+                    }
                 }
 
                 break;
 
             case WALK_TO_BANK:
-                DaxWalker.walkToBank(RunescapeBank.LUMBRIDGE_TOP);
+                runCheck();
+                if (DaxWalker.walkToBank(RunescapeBank.LUMBRIDGE_TOP)){
+                    Timing.waitCondition(() -> Player.isMoving(), General.random(600, 1100));
+                }
 
                 break;
 
@@ -186,29 +158,17 @@ public class Main extends Script implements Painting {
                 if (isAtBank()){
                     if (Banking.isBankScreenOpen()){
                         Banking.depositAll();
+                        Timing.waitCondition(() -> Inventory.getAll().length < 1, General.random(600, 1100));
                     } else {
                         if (Banking.openBank()){
-                            Timing.waitCondition(new Condition() {
-                                @Override
-                                public boolean active() {
-                                    General.sleep(100);
-                                    return Banking.isBankScreenOpen();
-                                }
-
-                            }, General.random(1100, 2400));
+                            Timing.waitCondition(() -> Banking.isBankScreenOpen(), General.random(600, 1100));
                         }
                     }
                 } else {
-                    if (DaxWalker.walkToBank()){
-                        Timing.waitCondition(new Condition() {
-                            @Override
-                            public boolean active() {
-                                return !Player.isMoving();
-                            }
-                        }, General.random(1200, 2000));
+                    if (DaxWalker.walkToBank(RunescapeBank.LUMBRIDGE_TOP)){
+                        Timing.waitCondition(() -> Player.isMoving(), General.random(600, 1100));
                     }
                 }
-
 
                 break;
 
@@ -216,41 +176,27 @@ public class Main extends Script implements Painting {
 
                 break;
 
-
             case USE_WHEEL:
                 clickOnWheel();
-
                 break;
 
-
             case WALK_TO_WHEEL:
-                if (spinner.isOnScreen() && spinner.isClickable()){
-                    if (!Player.isMoving() || Player.getPosition().equals(spinner)) {
-                        if (Walking.clickTileMS(spinner, "Walk here")) {
-                            Timing.waitCondition(new Condition() {
-                                @Override
-                                public boolean active() {
-                                    General.sleep(100);
-                                    return !Player.isMoving();
-                                }
-
-                            }, General.random(1100, 2400));
+                runCheck();
+                if (SPINNER_TILE.isOnScreen() && SPINNER_TILE.isClickable()){
+                    if (!Player.isMoving() || Player.getPosition().equals(SPINNER_TILE)) {
+                        if (Walking.clickTileMS(SPINNER_TILE, "Walk here")) {
+                            Timing.waitCondition(() -> !Player.isMoving(), General.random(1100, 2400));
                         }
                     }
                 } else {
-                    if (DaxWalker.walkTo(spinner.getPosition())){
-                        Timing.waitCondition(new Condition() {
-                            @Override
-                            public boolean active() {
-                                return !Player.isMoving();
-                            }
-                        }, General.random(1200, 2000));
+                    if (DaxWalker.walkTo(SPINNER_TILE.getPosition())){
+                        Timing.waitCondition(() -> !Player.isMoving(), General.random(600, 1100));
                     }
                 }
+                break;
 
-
-
-
+            case END:
+                continueRunning = false;
                 break;
 
         }
@@ -260,7 +206,7 @@ public class Main extends Script implements Painting {
 
 
     public enum State {
-        DEPOSIT, ANIMATING, WITHDRAW, WALK_TO_BANK, WALK_TO_WHEEL, USE_WHEEL, OPEN_BANK, IDLE;
+        DEPOSIT, ANIMATING, WITHDRAW, WALK_TO_BANK, WALK_TO_WHEEL, USE_WHEEL, IDLE, END
     }
 
     private State getState() {
@@ -269,6 +215,7 @@ public class Main extends Script implements Painting {
                 .sortByDistance()
                 .getFirstResult();
 
+
         if (Skills.getCurrentLevel(Skills.SKILLS.CRAFTING) < CraftingItem.BOWSTRING.requiredLevel) {
             currentResource = CraftingItem.BALLOFWOOL.resourceName;
             currentFinishedItem = CraftingItem.BALLOFWOOL.finishedName;
@@ -276,7 +223,6 @@ public class Main extends Script implements Painting {
             currentResource = CraftingItem.BOWSTRING.resourceName;
             currentFinishedItem = CraftingItem.BOWSTRING.finishedName;
         }
-
 
         if (isAtBank()) {
             if (Banking.isBankScreenOpen()) {
@@ -291,7 +237,7 @@ public class Main extends Script implements Painting {
                         return State.WITHDRAW;
                     } else {
                         // Change this later to end script or restock
-                        return State.ANIMATING;
+                        return State.END;
                     }
                 }
             } else {
@@ -340,11 +286,7 @@ public class Main extends Script implements Painting {
     }
 
 
-
-
-
-
-        public enum CraftingItem {
+        private enum CraftingItem {
 
             BOWSTRING("Flax", "Bow String", 10),
             BALLOFWOOL("Wool", "Ball of Wool", 1);
@@ -375,18 +317,6 @@ public class Main extends Script implements Painting {
 
         }
 
-
-        private boolean hasItemFilter (String...ItemName){
-            RSItem[] items = Inventory.find(Filters.Items.nameContains(ItemName));
-            return items.length > 0 && items[0]!=null;
-        }
-
-        private boolean bankHasItemFilter (String...ItemName){
-            RSItem[] items = Banking.find(Filters.Items.nameContains(ItemName));
-            return items.length > 0 && items[0]!=null;
-        }
-
-
         private boolean hasItem (String...ItemName){
             RSItem[] items = Inventory.find(ItemName);
             return items.length > 0 && items[0]!=null;
@@ -397,31 +327,12 @@ public class Main extends Script implements Painting {
             return items.length > 0 && items[0]!=null;
         }
 
-
         private boolean isAtBank () {
             RSObject[] bank = Objects.findNearest(10, "Bank booth", "Bank chest", "Banker");
             return bank.length > 0 && bank[0] != null;
         }
 
-
-
-        private boolean isAtGE () {
-            return geArea.contains(Player.getPosition());
-        }
-
-        public static RSArea geArea = new RSArea(
-                new RSTile(3160, 3493, 0),
-                new RSTile(3169, 3486, 0)
-        );
-
-
-        private boolean walkToGE () {
-            return DaxWalker.walkTo(geArea.getRandomTile());
-        }
-
-
-        private boolean clickOnWheel () {
-            
+        private void clickOnWheel () {
 
             RSObject spinner = Entities.find(ObjectEntity::new)
 
@@ -442,48 +353,29 @@ public class Main extends Script implements Painting {
             if (spinner!=null){
                 if (bowstring == null){
                     if (Clicking.click("Spin",spinner)){
-                        Timing.waitCondition(new Condition() {
-                            @Override
-                            public boolean active() {
-                                return bowstring != null;
-                            }
-                        }, General.random(900, 1600));
+                        Timing.waitCondition(() -> bowstring!=null, General.random(600, 1100));
+
                     }
                 } else {
                     if (currentResource == "Flax") {
                         if (Clicking.click(bowstring)) {
-                            Timing.waitCondition(new Condition() {
-                                @Override
-                                public boolean active() {
-                                    return !continuouslyAnimating();
-                                }
-                            }, General.random(1600, 2000));
+                            Timing.waitCondition(() -> !continuouslyAnimating(), General.random(600, 1100));
+
                         }
                     } else {
                         if (currentResource == "Wool"){
                             if (Clicking.click(ballofwool)) {
-                                Timing.waitCondition(new Condition() {
-                                    @Override
-                                    public boolean active() {
-                                        return !continuouslyAnimating();
-                                    }
-                                }, General.random(1600, 2000));
+                                Timing.waitCondition(() -> !continuouslyAnimating(), General.random(600, 1100));
                             }
                         }
                     }
                 }
             }
-            return true;
+
         }
 
         public static boolean continuouslyAnimating () {
-            return Timing.waitCondition(new Condition() {
-                @Override
-                public boolean active() {
-                    return Player.getAnimation() != -1;
-                }
-            }, General.random(2000, 3000));
-
+            return Timing.waitCondition(() -> Player.getAnimation()!=-1, General.random(600, 1100));
         }
 
 }
