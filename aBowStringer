@@ -149,7 +149,7 @@ public class Main extends Script implements Painting, Arguments {
             case WALK_TO_BANK:
                 runCheck();
                 if (DaxWalker.walkToBank(RunescapeBank.LUMBRIDGE_TOP)){
-                    Timing.waitCondition(() -> Player.isMoving(), General.random(600, 1100));
+                    Timing.waitCondition(() -> !Player.isMoving(), General.random(600, 1100));
                 }
 
                 break;
@@ -166,7 +166,7 @@ public class Main extends Script implements Painting, Arguments {
                     }
                 } else {
                     if (DaxWalker.walkToBank(RunescapeBank.LUMBRIDGE_TOP)){
-                        Timing.waitCondition(() -> Player.isMoving(), General.random(600, 1100));
+                        Timing.waitCondition(() -> !Player.isMoving(), General.random(600, 1100));
                     }
                 }
 
