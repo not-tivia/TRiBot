@@ -34,9 +34,19 @@ import java.util.*;
 
 
 public class main extends Script implements Arguments,MessageListening07,Painting {
+    String args;
+    @Override
+    public void passArguments(HashMap<String, String> hashMap) {
+        if (hashMap.containsKey("custom_input")) {
+            args = hashMap.get("custom_input");
+        } else if (hashMap.containsKey("autostart")) {
+            args = hashMap.get("autostart");
+        }
+    }
+
     private boolean debug = true;
 
-    private State scriptState = getState();
+    private State scriptState;
     private boolean continueRunning = true;
 
     private RSArea AreaCatacombsAnkou = new RSArea(new RSTile(1635, 9990, 0), new RSTile(1645, 9998, 0));
@@ -46,6 +56,9 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
     private RSArea areaFallyCows = new RSArea(new RSTile(3023, 3311, 0), new RSTile(3039, 3299, 0));
     private RSArea areaAdventureJon = new RSArea(new RSTile(3231, 3232, 0), new RSTile(3234, 3235, 0));
     private RSArea areaLumbridgeGoblins = new RSArea(new RSTile(3240, 3242, 0), new RSTile(3263, 3227, 0));
+    private RSArea areaWildyAnkou = new RSArea(new RSTile(2958, 3765, 0), new RSTile(2994, 3740, 0));
+    private RSArea areaWildyBandits = new RSArea(new RSTile(3030, 3681, 0), new RSTile(3043, 3648, 0));
+    private RSArea areaWildyBears = new RSArea(new RSTile(3098, 3680, 0), new RSTile(3122, 3643, 0));
 
     private double alch_At = 0;
 
@@ -82,7 +95,7 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
     public final int EATING_ANIMATION = 829;
     private boolean reloadCannnonNow = false;
     //private ACamera aCamera = new ACamera(this);
-    String args;
+
 
     private boolean foodFound = false;
 
@@ -99,14 +112,6 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
     //private RSGroundItem[] heads = GroundItems.findNearest(Filters.GroundItems.nameContains("Ensouled"));
     // private final String heads[] = {GroundItems.getAll().contains("Ensouledled")};
 
-    @Override
-    public void passArguments(HashMap<String, String> hashMap) {
-        if (hashMap.containsKey("custom_input")) {
-            args = hashMap.get("custom_input");
-        } else if (hashMap.containsKey("autostart")) {
-            args = hashMap.get("autostart");
-        }
-    }
 
     public String main = "[Main] ";
     public String antiban = "[AnTiBaN] ";
@@ -145,9 +150,7 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
     private boolean trainingMode = false;
     private boolean trainingAreaDecided = false;
 
-    int attackLevel = Skills.getActualLevel(Skills.SKILLS.ATTACK);
-    int strengthLevel = Skills.getActualLevel(Skills.SKILLS.STRENGTH);
-    int defenseLevel = Skills.getActualLevel(Skills.SKILLS.DEFENCE);
+
 
     private int strenth1 = 0;
     private int strenth2 = 0;
@@ -204,12 +207,25 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
 
     @Override
     public void run() {
-        while (continueRunning){
-            loop();
+        if (onStart()) {
+            while (continueRunning) {
+                if (inGame()) {
+                    loop();
+                }
+            }
         }
 
     }
+    public  boolean inGame() {
+       return Login.getLoginState() == Login.STATE.INGAME;
 
+    }
+
+    private boolean onStart(){
+        daxStart();
+        continueRunning = true;
+        return true;
+    }
 
 
     public static boolean reloadNow() {
@@ -354,27 +370,33 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
 
 
     private int loop() {
+
         scriptState = getState();
         General.sleep(50);
         Mouse.setSpeed(General.random(95, 260));
-        daxStart();
-        runCheck();
+
+
         switch (scriptState) {
 
             case WALK_TO_NPC:
 
-
+                runCheck();
                 if (trainingMode ){
+                    int attackLevel = Skills.getActualLevel(Skills.SKILLS.ATTACK);
+                    int strengthLevel = Skills.getActualLevel(Skills.SKILLS.STRENGTH);
+                    int defenseLevel = Skills.getActualLevel(Skills.SKILLS.DEFENCE);
                     if (attackLevel <= 15 || strengthLevel <= 20 || defenseLevel <= 10){
-                        if (DaxWalker.walkTo(areaSeagulls.getRandomTile())){
-                            Timing.waitCondition(() -> !Player.isMoving(), General.random(600, 1100));
-
+                        if (!areaSeagulls.contains(Player.getPosition())) {
+                            if (DaxWalker.walkTo(areaSeagulls.getRandomTile())) {
+                                Timing.waitCondition(() -> !Player.isMoving(), General.random(600, 1100));
+                            }
                         }
                     } else {
-                       if (DaxWalker.walkTo(areaFallyCows.getRandomTile())){
-                           Timing.waitCondition(() -> !Player.isMoving(), General.random(600, 1100));
-
-                       }
+                        if (!areaFallyCows.contains(Player.getPosition())) {
+                            if (DaxWalker.walkTo(areaFallyCows.getRandomTile())) {
+                                Timing.waitCondition(() -> !Player.isMoving(), General.random(600, 1100));
+                            }
+                        }
                     }
                 }
 
@@ -385,7 +407,9 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
                     if (NPCChat.getClickContinueInterface()!=null){
                         Keyboard.typeSend(" ");
                     }
-                    DaxWalker.walkTo(areaAdventureJon.getRandomTile());
+                    if (DaxWalker.walkTo(areaAdventureJon.getRandomTile())){
+                        Timing.waitCondition(() -> !Player.isMoving(), General.random(600, 1100));
+                    }
                 } else {
                     RSNPC[] jon = NPCs.find("Adventurer Jon");
                     if (jon.length > 0 && jon[0]!=null){
@@ -455,6 +479,7 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
                 if (NPCChat.getClickContinueInterface()!=null){
                     Keyboard.typeSend(" ");
                 }
+                runCheck();
                 performTimedActions();
                 checkStats();
                 int attackLevel = Skills.getActualLevel(Skills.SKILLS.ATTACK);
@@ -539,9 +564,16 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
                     General.println("Welcome back " + General.getTRiBotUsername());
 
                     if (!onstartCheck) {
+                        if (args.isEmpty()){
+                            trainingMode = true;
+                        }
                         Camera.setRotationMethod(Camera.ROTATION_METHOD.DEFAULT);
                         if (isOnStandardSpellbook() && hasAlchRunes()) {
                             alchDecision = true;
+                        }
+                        if (!Combat.isAutoRetaliateOn()){
+                            Combat.setAutoRetaliate(true);
+                            General.sleep(600,1200);
                         }
 
                         RSItem[] food = Inventory.find(Filters.Items.actionsEquals("Eat"));
@@ -646,7 +678,7 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
         g.drawString("Alch percentage" + alch_At, 5, 150);
         g.drawString("Drink next ppot: " + drinkAt, 5, 170);
         g.drawString("Food:  " +  foodID + " at " + eat_at + "%" , 5,200);
-        g.drawString("Trainer mode:  " +  trainingMode, 5,220);
+        g.drawString("Trainer mode:  " +  trainingMode + attack4 + " " +strenth4 + " " + 40, 5,240);
 
 
         if (debug){
@@ -780,6 +812,7 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
         int attackLevel = Skills.getActualLevel(Skills.SKILLS.ATTACK);
         int strengthLevel = Skills.getActualLevel(Skills.SKILLS.STRENGTH);
         int defenseLevel = Skills.getActualLevel(Skills.SKILLS.DEFENCE);
+
         if (attackLevel >= 40 && strengthLevel >= 40 && defenseLevel >= 40){
             trainingMode = false;
         } else {
@@ -838,6 +871,9 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
                             }
                         }
                     } else {
+                        if (isUnderAtackByTarget()){
+                            return State.CURRENTLY_FIGHTING;
+                        }
                         return State.WALK_TO_NPC;
                     }
                 } else {
@@ -853,6 +889,17 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
 
         } else {
             return State.ONSTART;
+        }
+    }
+
+    private boolean isUnderAtackByTarget(){
+        if (trainingMode){
+            RSNPC[] attackingme = NPCs.find("Cow");
+            return Combat.isUnderAttack() && attackingme.length > 0 && attackingme[0].isInteractingWithMe();
+
+        } else {
+            RSNPC[] attackingme = NPCs.find(args);
+            return Combat.isUnderAttack() && attackingme.length > 0 && attackingme[0].isInteractingWithMe();
         }
     }
 
@@ -1480,10 +1527,9 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
             General.sleep(General.randomSD(750, 1500, 1000, 150)); // sleep makes sure it checks xp longer.
         }
 
-        if (abcInstance.shouldExamineEntity()){
+        if (abcInstance.shouldExamineEntity())
             General.sleep(sleeptime);
-            General.println("Slept for "+ sleeptime);
-        }
+
 
 
         if (abcInstance.shouldMoveMouse())
@@ -1527,11 +1573,11 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
     public static void navigateToNPC(final RSNPC npc){
         if (!npc.isOnScreen()){
             npc.adjustCameraTo();
-            if (Timing.waitCondition(() -> npc.isOnScreen()&& npc.isClickable(), General.random(2000, 3000))){
+            if (Timing.waitCondition(() -> npc.isOnScreen()|| npc.isClickable(), General.random(2000, 3000))){
 
             } else {
                 PathFinding.aStarWalk(npc.getPosition());
-                Timing.waitCondition(() -> npc.isOnScreen()&& npc.isClickable(), General.random(2000, 3000));
+                Timing.waitCondition(() -> npc.isOnScreen()|| npc.isClickable(), General.random(2000, 3000));
             }
         }
 
@@ -1541,6 +1587,19 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
      * @param npc
      * @return true if in combat with npc, false otherwise.
      */
+
+    public static void finishNPC(final RSNPC npc){
+        if (npc == null)
+            return;
+       if (!npc.isOnScreen())
+           return;
+       if (!npc.isInCombat() && npc.isValid() && Movement.canReach(npc) && npc.getInteractingCharacter() == Player.getRSPlayer()){
+           if (doAttack(npc)){
+               General.println("Target is attacking me and I'm not attacking them... attempting to finish target.");
+               General.sleep(4000,7000);
+           }
+       }
+    }
     public static void attackNPC(final RSNPC npc) {
 
         if (npc == null)
@@ -1582,6 +1641,8 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
         return false;
 
     }
+
+
 
     private int eat_at = abcInstance.generateEatAtHP();
 
@@ -1679,6 +1740,7 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
 
 
                 }
+
                 // adsadadasdasdsadattack is less than 30 and attack is greater than 20 and strength is less than 30
                 if (Skills.getActualLevel(Skills.SKILLS.STRENGTH) < strenth4 && Skills.getActualLevel(Skills.SKILLS.STRENGTH) > strenth3 && Skills.getActualLevel(Skills.SKILLS.ATTACK) < attack3) {
                     if (Combat.getSelectedStyleIndex() != 0) {
@@ -1693,14 +1755,14 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
                         Combat.selectIndex(1);
                     }
                 }
-                if (Skills.getActualLevel(Skills.SKILLS.STRENGTH) >= 40 && Skills.getActualLevel(Skills.SKILLS.ATTACK) < attack4) {
+                if (Skills.getActualLevel(Skills.SKILLS.STRENGTH) >= strenth4 && Skills.getActualLevel(Skills.SKILLS.ATTACK) < attack4) {
                     if (Combat.getSelectedStyleIndex() != 0) {
                         General.println("Setting attack Style to Attack");
                         Combat.selectIndex(0);
                     }
                 }
 
-                if (Skills.getActualLevel(Skills.SKILLS.STRENGTH) >= 40 && Skills.getActualLevel(Skills.SKILLS.ATTACK) >= 40) {
+                if (Skills.getActualLevel(Skills.SKILLS.STRENGTH) >= strenth4 && Skills.getActualLevel(Skills.SKILLS.ATTACK) >= attack4) {
                     if (Combat.getSelectedStyleIndex() != 3) {
                         General.println("Setting attack Style to Defence");
                         Combat.selectIndex(3);
@@ -1709,9 +1771,9 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
 
 
 
-        if (Skills.getActualLevel(Skills.SKILLS.ATTACK) == 40 && Skills.getActualLevel(Skills.SKILLS.STRENGTH) == 40 && Skills.getActualLevel(Skills.SKILLS.DEFENCE) == General.random(30, 40)) {
-                   continueRunning = false;
-                }
+        if (Skills.getActualLevel(Skills.SKILLS.DEFENCE) == General.random(30, 40)) {
+            continueRunning = false;
+        }
     }
 
 
