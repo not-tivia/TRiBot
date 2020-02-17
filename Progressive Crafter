@@ -1,12 +1,10 @@
 package scripts.progressiveCrafter;
 
-
 import org.tribot.api.General;
 import org.tribot.api.Timing;
 import org.tribot.api.input.Keyboard;
 import org.tribot.api.input.Mouse;
-import org.tribot.api.types.generic.Condition;
-import org.tribot.api.types.generic.Filter;
+import org.tribot.api.util.abc.ABCUtil;
 import org.tribot.api2007.*;
 import org.tribot.api2007.ext.Filters;
 import org.tribot.api2007.types.RSInterface;
@@ -16,7 +14,6 @@ import org.tribot.script.Script;
 import org.tribot.script.ScriptManifest;
 import org.tribot.script.interfaces.Arguments;
 import org.tribot.script.interfaces.Painting;
-
 
 import java.awt.*;
 import java.awt.event.KeyEvent;
@@ -45,6 +42,10 @@ public class main extends Script implements Painting, Arguments {
 
     String args;
 
+    private ABCUtil abcInstance = new ABCUtil();
+
+    
+
 
     @Override
     public void passArguments(HashMap<String, String> hashMap) {
@@ -55,23 +56,23 @@ public class main extends Script implements Painting, Arguments {
         }
     }
 
+
+
     private boolean onStart() {
         if (continuerunning) {
             General.println("Script Started... Progressive Crafter V12");
-            General.println("Welcome back " + General.getTRiBotUsername());
-            println("Method type: " + args);
+            General.println("Method type: " + args);
             if (General.getTRiBotUsername().equals("filthyfrank")) {
                 useNumbers = true;
             }
             if (General.getTRiBotUsername().equals("adamhackz")) {
                 useNumbers = true;
             }
-            if (useNumbers){
-                if (!escapeCloseInterfacesEnabled()){
+            if (useNumbers) {
+                if (!escapeCloseInterfacesEnabled()) {
                     setKeybindingDefault(true);
                 }
             }
-
             return true;
         } else return false;
 
@@ -86,468 +87,261 @@ public class main extends Script implements Painting, Arguments {
         }
     }
 
-    private boolean hasRequiredLeather() {
-        RSItem[] needle = Inventory.find("Needle");
-        RSItem[] thread = Inventory.find("Thread");
-
-        return needle.length > 0 && needle != null && thread.length > 0 && thread != null;
-
-
+    private boolean hasRequired() {
+        if (args.equals("leather")) {
+            RSItem[] needle = Inventory.find("Needle");
+            RSItem[] thread = Inventory.find("Thread");
+            return needle.length > 0 && needle[0] != null && thread.length > 0 && thread[0] != null;
+        }
+        if (args.equals("glass")) {
+            RSItem[] glassblowingPipe = Inventory.find("Glassblowing pipe");
+            return glassblowingPipe.length > 0 && glassblowingPipe[0] != null;
+        }
+        return false;
     }
 
+    private boolean hasMats() {
+        if (args.equals("leather")) {
+            RSItem[] leather = Inventory.find("Leather");
+            return leather.length > 0 && leather[0] != null;
+        }
+        if (args.equals("glass")) {
+            RSItem[] glass = Inventory.find("Molten glass");
+            return glass.length > 0 && glass[0] != null;
 
-    private boolean hasRequiredGlass() {
-        RSItem[] glassblowingPipe = Inventory.find("Glassblowing pipe");
-        return glassblowingPipe.length > 0 && glassblowingPipe[0] != null;
+        }
+        return false;
     }
-
-
-
-    private boolean hasNeedle() {
-        return Inventory.find("Needle").length > 0;
-    }
-
-    private boolean hasThread() {
-        return Inventory.find("Thread").length > 0;
-    }
-
-    private boolean bankHasThread() {
-        return Banking.find("Thread").length > 0;
-    }
-
-
-
-    private boolean bankHasNeedle() {
-        return Banking.find("Needle").length > 0;
-    }
-
-    private boolean bankHasPipe() {
-        return Banking.find("Glassblowing pipe").length > 0;
-    }
-
-    private boolean hasPipe() {
-        return Inventory.find("Glassblowing pipe").length > 0;
-    }
-
-
-    private boolean hasLeather() {
-        return Inventory.find("Leather").length > 0;
-
-    }
-
-    private boolean hasGlass() {
-        return Inventory.find("Molten glass").length > 0;
-    }
-
-    private boolean hasBattlestaff() {
-        return Inventory.find("Battlestaff").length > 0;
-    }
-
-    private boolean hasAirOrb() {
-        return Inventory.find("Air orb").length > 0;
-    }
-
-
 
     @Override
     public void onPaint(Graphics g) {
 
         NumberFormat.getInstance();
         long runtime = System.currentTimeMillis() - START_TIME;
-        long dumbass = Skills.getXP(Skills.SKILLS.CRAFTING)-startingXP;
+        long dumbass = Skills.getXP(Skills.SKILLS.CRAFTING) - startingXP;
 
         g.drawString("Argument: " + args, 5, 60);
         g.drawString("State: " + scriptState, 5, 80);
         g.drawString("Running for: " + Timing.msToString(runtime), 5, 100);
-        g.drawString("XP gained:  " + dumbass, 5,120);
+        g.drawString("XP gained:  " + dumbass, 5, 120);
 
 
     }
 
 
-
-
     private int loop() {
         scriptState = getState();
         General.sleep(50);
-
         switch (scriptState) {
 
 
-            case BANKING:
-                    Banking.openBank();
-                    Timing.waitCondition(new Condition() {
-                        @Override
-                        public boolean active() {
-                            return (isBankOpen());
-                        }
-                    }, General.random(1200, 1900));
-
+            case HANDLE_BANK:
+                if (!hasMats()) {
+                    if (Banking.openBank()) {
+                        Timing.waitCondition(() -> Banking.isBankScreenOpen(), General.random(2500, 4100));
+                    }
+                } else {
+                    closeBank();
+                }
 
                 break;
-            case LEATHER:
 
+            case WITHDRAW_MATS:
 
                 if (args.equals("leather")) {
-                    int craftingLevel = Skills.getActualLevel(Skills.SKILLS.CRAFTING);
-                    currentlyPerformingAction = continuouslyAnimating();
+                    RSItem[] material = Banking.find(Items.LEATHER.material);
+                    if (material.length < 1) {
+                        continuerunning = false;
+                        General.println("Out of " + material[0].getDefinition().getName());
+                    } else
+                        continuerunning = true;
+                    RSItem[] completeditem = Inventory.find("Unpowered orb", "Beer glass", "Candle lantern", "Oil lamp", "Oil lantern", "Vial", "Fishbowl", "Glass orb", "Sapphire", "Ruby", "Emerald", "Diamond", "Coif");
+                    RSItem[] leatheritem = Inventory.find(Filters.Items.nameContains("Leather").combine(Filters.Items.nameNotEquals("Leather"), true));
 
+                    RSItem[] materialInv = Inventory.find(Items.LEATHER.material);
+                    RSItem[] materialBank = Banking.find(Items.LEATHER.material);
 
-                    if (!currentlyPerformingAction && !Interfaces.isInterfaceSubstantiated(270)) {
-                        combine();
-                    }
-
-
-                    if (Interfaces.isInterfaceSubstantiated(270)) {
-                        if (craftingLevel < 7) {
-                            gloves();
-                            Timing.waitCondition(new Condition() {
-                                @Override
-                                public boolean active() {
-                                    return (!Interfaces.isInterfaceSubstantiated(270));
-                                }
-                            }, General.random(2000, 3000));
-
+                    //if has coif or leather item, then deposit all except required 1 and 2
+                    if (completeditem.length > 0 || leatheritem.length > 0){
+                        if (materialInv.length < 1){
+                            Banking.depositAllExcept(Items.LEATHER.requiredOne, Items.LEATHER.requiredTwo);
+                            Timing.waitCondition(() -> completeditem.length < 1 || leatheritem.length < 1, General.random(2500, 4100));
                         }
-
-                        if (craftingLevel >= 7 && craftingLevel < 9) {
-                            boots();
-                            Timing.waitCondition(new Condition() {
-                                @Override
-                                public boolean active() {
-                                    return (!Interfaces.isInterfaceSubstantiated(270));
+                    } else {
+                        if (hasRequired()){
+                            if (materialInv.length < 1) {
+                                if (materialBank.length > 0) {
+                                    if (Banking.withdraw(0, Items.LEATHER.material)) {
+                                        Timing.waitCondition(() -> materialInv.length > 0, General.random(2500, 4100));
+                                    }
+                                } else {
+                                    General.println("Out of leather");
+                                    continuerunning = false;
                                 }
-                            }, General.random(2000, 3000));
-                        }
-                        if (craftingLevel >= 9 && craftingLevel < 11) {
-                            cowl();
-
-                            Timing.waitCondition(new Condition() {
-                                @Override
-                                public boolean active() {
-                                    return (!Interfaces.isInterfaceSubstantiated(270));
-                                }
-                            }, General.random(2000, 3000));
-
-                        }
-
-                        if (craftingLevel >= 11 && craftingLevel < 14) {
-                            leathervambraces();
-                            Timing.waitCondition(new Condition() {
-                                @Override
-                                public boolean active() {
-                                    return (!Interfaces.isInterfaceSubstantiated(270));
-                                }
-                            }, General.random(2000, 3000));
-                        }
-
-
-                        if (craftingLevel >= 14 && craftingLevel < 18) {
-                            leatherbody();
-                            Timing.waitCondition(new Condition() {
-                                @Override
-                                public boolean active() {
-                                    return (!Interfaces.isInterfaceSubstantiated(270));
-                                }
-                            }, General.random(2000, 3000));
-
-
-                        }
-
-
-                        if (craftingLevel >= 18 && craftingLevel < 38) {
-                            leatherchaps();
-                            Timing.waitCondition(new Condition() {
-                                @Override
-                                public boolean active() {
-                                    return (!Interfaces.isInterfaceSubstantiated(270));
-                                }
-                            }, General.random(2000, 3000));
-
-                        }
-                        if (craftingLevel >= 38) {
-                            RSInterface coif = Interfaces.get(270, 20);
-
-                            if (!coif.getComponentName().isEmpty()) {
-                                coif();
                             } else {
-                                leatherchaps();
+                                closeBank();
                             }
-                            Timing.waitCondition(new Condition() {
-                                @Override
-                                public boolean active() {
-                                    return (!Interfaces.isInterfaceSubstantiated(270));
-                                }
-                            }, General.random(2000, 3000));
                         }
                     }
                 }
 
+                if (args.equals("glass")) {
+                    RSItem[] material = Banking.find(Items.GLASS.material);
+                    if (material.length < 1) {
+                        continuerunning = false;
+                        General.println("Out of " + material[0].getDefinition().getName());
+                    } else
+                        continuerunning = true;
+                    RSItem[] completeditem = Inventory.find("Unpowered orb", "Beer glass", "Candle lantern", "Oil lamp", "Oil lantern", "Vial", "Fishbowl", "Glass orb", "Sapphire", "Ruby", "Emerald", "Diamond", "Coif");
+                    RSItem[] leatheritem = Inventory.find(Filters.Items.nameContains("Leather").combine(Filters.Items.nameNotEquals("Leather"), true));
+                    
+                    RSItem[] materialInv = Inventory.find(Items.GLASS.material);
+                    RSItem[] materialBank = Banking.find(Items.GLASS.material);
 
+                    //if has coif or leather item, then deposit all except required 1 and 2
+                    if (completeditem.length > 0 || leatheritem.length > 0){
+                        if (materialInv.length < 1){
+                            Banking.depositAllExcept(Items.GLASS.requiredOne, Items.GLASS.requiredTwo);
+                            Timing.waitCondition(() -> completeditem.length < 1 || leatheritem.length < 1, General.random(2500, 4100));
+                        }
+                    } else {
+                        if (hasRequired()){
+                            if (materialInv.length < 1) {
+                                if (materialBank.length > 0) {
+                                    if (Banking.withdraw(0, Items.GLASS.material)) {
+                                        Timing.waitCondition(() -> materialInv.length > 0, General.random(2500, 4100));
+                                    }
+                                } else {
+                                    General.println("Out of molten glass");
+                                    continuerunning = false;
+                                }
+                            } else {
+                                closeBank();
+                            }
+                        }
+                    }
+                }
                 break;
 
-            case GLASS:
 
-
+                
+            case HANDLING_INTERFACES:
                 int craftingLevel = Skills.getActualLevel(Skills.SKILLS.CRAFTING);
                 currentlyPerformingAction = continuouslyAnimating();
-                if (!currentlyPerformingAction && !Interfaces.isInterfaceSubstantiated(270)) {
-                    combine2();
-                }
-                if (Interfaces.isInterfaceSubstantiated(270)) {
-
-                    if (craftingLevel < 4) {
-                        beerglass();
-                        Timing.waitCondition(new Condition() {
-                            @Override
-                            public boolean active() {
-                                return (!Interfaces.isInterfaceSubstantiated(270));
-                            }
-                        }, General.random(2000, 3000));
-
-                    }
-
-                    if (craftingLevel >= 4 && craftingLevel < 12) {
-                        candlelantern();
-                        Timing.waitCondition(new Condition() {
-                            @Override
-                            public boolean active() {
-                                return (!Interfaces.isInterfaceSubstantiated(270));
-                            }
-                        }, General.random(2000, 3000));
-
-                    }
-
-                    if (craftingLevel >= 12 && craftingLevel < 33) {
-                        oillamp();
-                        Timing.waitCondition(new Condition() {
-                            @Override
-                            public boolean active() {
-                                return (!Interfaces.isInterfaceSubstantiated(270));
-                            }
-                        }, General.random(2000, 3000));
-
-                    }
-
-                    if (craftingLevel >= 33 && craftingLevel < 42) {
-                        vial();
-                        Timing.waitCondition(new Condition() {
-                            @Override
-                            public boolean active() {
-                                return (!Interfaces.isInterfaceSubstantiated(270));
-                            }
-                        }, General.random(2000, 3000));
-
-                    }
-
-                    if (craftingLevel >= 42 && craftingLevel < 46) {
-                        fishbowl();
-                        Timing.waitCondition(new Condition() {
-                            @Override
-                            public boolean active() {
-                                return (!Interfaces.isInterfaceSubstantiated(270));
-                            }
-                        }, General.random(2000, 3000));
-
-                    }
-
-
-                    if (craftingLevel >= 46) {
-                        orb();
-                        Timing.waitCondition(new Condition() {
-                            @Override
-                            public boolean active() {
-                                return (!Interfaces.isInterfaceSubstantiated(270));
-                            }
-                        }, General.random(2000, 3000));
-
-                    }
-                }
-
-
-                break;
-
-            case WITHDRAW:
-                    if (args.equals("battlestaff")) {
-
-                        //End if out of orbs or battlestaffs
-                        RSItem[] battlestaff = Banking.find(items.STAFF.material);
-                        RSItem[] airorb = Banking.find(items.STAFF.requiredOne);
-                        if (battlestaff.length < 1 || airorb.length < 1) {
-                            continuerunning = false;
-                            General.println("Out of supplies");
-                        } else
-                            continuerunning = true;
-
-
-                        //Deposit all if air battlestaffs in inventory
-                        RSItem[] airstaff = Inventory.find(items.STAFF.finalItem);
-                        if (airstaff.length > 0) {
-                            Timing.waitCondition(new Condition() {
-                                @Override
-                                public boolean active() {
-                                    return airstaff.length > 0;
-                                }
-                            }, General.random(1200, 1900));
-                            Banking.depositAll();
-                        }
-
-                        //if no air battlestaffs and no air orbs or battlestaffs then withdraw
-                        if (airstaff.length < 1 && battlestaff.length > 0 && airorb.length > 0) {
-                            if (Banking.withdraw(14, "Battlestaff")) {
-                                Timing.waitCondition(new Condition() {
-                                    @Override
-                                    public boolean active() {
-                                        return Inventory.find("Battlestaff").length > 0;
-                                    }
-                                }, General.random(1100, 1900));
-
-                            }
-                            if (Inventory.find(items.STAFF.material).length > 0) {
-                                if (Banking.withdraw(0, "Air orb")) {
-                                    Timing.waitCondition(new Condition() {
-                                        @Override
-                                        public boolean active() {
-                                            return Inventory.find("Air orb").length > 0;
-                                        }
-                                    }, General.random(1100, 1900));
-
-                                }
-                            }
-
-                        }
-                        if (Inventory.find(items.STAFF.material).length > 0 && Inventory.find(items.STAFF.requiredOne).length > 0) {
-                            closeBank();
-                        }
-
-                    }
+                RSInterface craftingInterface = Interfaces.get(270);
                     if (args.equals("leather")) {
-                        RSItem[] material = Banking.find(items.LEATHER.material);
-                        if (material.length < 1) {
-                            continuerunning = false;
-                            General.println("Out of supplies");
-                        } else
-                            continuerunning = true;
-                        RSItem[] completeditem = Inventory.find("Unpowered orb", "Beer glass", "Candle lantern", "Oil lamp", "Oil lantern", "Vial", "Fishbowl", "Glass orb", "Sapphire", "Ruby", "Emerald", "Diamond", "Coif");
-                        RSItem[] leatheritem = Inventory.find(Filters.Items.nameContains("Leather").combine(Filters.Items.nameNotEquals("Leather"), true));
-
-                        RSItem[] requiredOne = Inventory.find(items.LEATHER.requiredOne);
-                        RSItem[] requiredTwo = Inventory.find(items.LEATHER.requiredTwo);
-                        RSItem[] materialInv = Inventory.find(items.LEATHER.material);
-
-                        //if has coif or leather item, then deposit all except required 1 and 2
-                        if (completeditem.length > 0 || leatheritem.length > 0 && materialInv.length < 1) {
-                            Banking.depositAllExcept(items.LEATHER.requiredOne, items.LEATHER.requiredTwo);
-                            Timing.waitCondition(new Condition() {
-                                @Override
-                                public boolean active() {
-                                    return completeditem.length < 1 || leatheritem.length < 1 && material.length > 0;
+                        if (!currentlyPerformingAction && !Interfaces.isInterfaceSubstantiated(craftingInterface)) {
+                            RSItem[] needle = Inventory.find("Needle");
+                            RSItem[] thread = Inventory.find("Thread");
+                            RSItem[] leather = Inventory.find("Leather");
+                            if (needle.length > 0 && leather.length > 0 && thread.length > 0) {
+                                if (needle[0].click() && findNearestToMouse("Leather")[0].click()){
+                                    Timing.waitCondition(() -> Interfaces.isInterfaceSubstantiated(craftingInterface), General.random(2500, 4100));
                                 }
-                            }, General.random(1200, 1900));
-
-                        }
-
-                        //if doesnt have complete items and has required, then withdraw leather and close bank
-                        if (completeditem.length < 1 || leatheritem.length < 1 && requiredOne.length > 0 && requiredTwo.length > 0) {
-                            if (Banking.withdraw(0, items.LEATHER.material)) {
-                                Timing.waitCondition(new Condition() {
-                                    @Override
-                                    public boolean active() {
-                                        return Inventory.getCount(items.LEATHER.material) > 0;
-                                    }
-                                }, General.random(1200, 1900));
-
                             }
                         }
 
-                        if (Inventory.find(items.LEATHER.material).length > 0 && Inventory.find(items.LEATHER.material)[0]!=null){
-                            closeBank();
+                        if (Interfaces.isInterfaceSubstantiated(270)) {
+                            if (craftingLevel < 7) {
+                                gloves();
+                                Timing.waitCondition(() -> !Interfaces.isInterfaceSubstantiated(craftingInterface), General.random(2500, 4100));
+                            }
+
+                            if (craftingLevel >= 7 && craftingLevel < 9) {
+                                boots();
+                                Timing.waitCondition(() -> !Interfaces.isInterfaceSubstantiated(craftingInterface), General.random(2500, 4100));
+
+                            }
+                            if (craftingLevel >= 9 && craftingLevel < 11) {
+                                cowl();
+                                Timing.waitCondition(() -> !Interfaces.isInterfaceSubstantiated(craftingInterface), General.random(2500, 4100));
+                            }
+
+                            if (craftingLevel >= 11 && craftingLevel < 14) {
+                                leathervambraces();
+                                Timing.waitCondition(() -> !Interfaces.isInterfaceSubstantiated(craftingInterface), General.random(2500, 4100));
+                            }
+
+
+                            if (craftingLevel >= 14 && craftingLevel < 18) {
+                                leatherbody();
+                                Timing.waitCondition(() -> !Interfaces.isInterfaceSubstantiated(craftingInterface), General.random(2500, 4100));
+                            }
+
+
+                            if (craftingLevel >= 18 && craftingLevel < 38) {
+                                leatherchaps();
+                                Timing.waitCondition(() -> !Interfaces.isInterfaceSubstantiated(craftingInterface), General.random(2500, 4100));
+                            }
+                            if (craftingLevel >= 38) {
+                                RSInterface coif = Interfaces.get(270, 20);
+                                //component only returns empty when in ftp
+                                if (!coif.getComponentName().isEmpty()) {
+                                    coif();
+                                } else {
+                                    leatherchaps();
+                                }
+                                Timing.waitCondition(() -> !Interfaces.isInterfaceSubstantiated(craftingInterface), General.random(2500, 4100));
+                            }
                         }
                     }
-
                     if (args.equals("glass")) {
-                        RSItem[] material = Banking.find(items.GLASS.material);
-                        if (material.length < 1) {
-                            continuerunning = false;
-                            General.println("Out of supplies");
-                        } else
-                            continuerunning = true;
+                        if (!currentlyPerformingAction && !Interfaces.isInterfaceSubstantiated(craftingInterface)) {
+                            RSItem[] glassblowingPipe = Inventory.find("Glassblowing pipe");
+                            if (hasItem("Glassblowing pipe") && hasItem("Molten glass")) {
+                                if (glassblowingPipe[0].click() && findNearestToMouse("Molten glass")[0].click()){
+                                    Timing.waitCondition(() -> Interfaces.isInterfaceSubstantiated(craftingInterface), General.random(2500, 4100));
 
-                        RSItem[] completeditem = Inventory.find("Unpowered orb", "Beer glass", "Candle lantern", "Oil lamp", "Oil lantern", "Vial", "Fishbowl", "Glass orb", "Sapphire", "Ruby", "Emerald", "Diamond", "Coif");
-                        RSItem[] requiredOne = Inventory.find(items.GLASS.requiredOne);
-                        RSItem[] materialInv = Inventory.find(items.GLASS.material);
-
-                        //if has glass item, then deposit all except required 1
-                        if (completeditem.length > 0 && completeditem[0]!=null && materialInv.length < 1) {
-                            Banking.depositAllExcept(items.GLASS.requiredOne);
-                            Timing.waitCondition(new Condition() {
-                                @Override
-                                public boolean active() {
-                                    return completeditem.length < 1 && completeditem[0]==null;
                                 }
-                            }, General.random(1200, 1900));
-
+                            }
                         }
-
-                        //if doesnt have complete items and has required, then withdraw glass and close bank
-                        if (completeditem.length < 1 && requiredOne.length > 0 && requiredOne[0]!=null && Inventory.find(items.GLASS.material).length < 1) {
-                            if (Banking.withdraw(0, items.GLASS.material)) {
-                                Timing.waitCondition(new Condition() {
-                                    @Override
-                                    public boolean active() {
-                                        return Inventory.getCount(items.GLASS.material) > 0;
-                                    }
-                                }, General.random(1200, 1900));
-
+                        if (Interfaces.isInterfaceSubstantiated(craftingInterface)) {
+                            if (craftingLevel < 4) {
+                                beerglass();
+                                Timing.waitCondition(() -> !Interfaces.isInterfaceSubstantiated(craftingInterface), General.random(2500, 4100));
                             }
 
-                        }
-                        if (Inventory.find(items.GLASS.material).length > 0 && Inventory.find(items.GLASS.material)[0]!=null){
-                            closeBank();
+                            if (craftingLevel >= 4 && craftingLevel < 12) {
+                                candlelantern();
+                                Timing.waitCondition(() -> !Interfaces.isInterfaceSubstantiated(craftingInterface), General.random(2500, 4100));
+                            }
+
+                            if (craftingLevel >= 12 && craftingLevel < 33) {
+                                oillamp();
+                                Timing.waitCondition(() -> !Interfaces.isInterfaceSubstantiated(craftingInterface), General.random(2500, 4100));
+                            }
+
+                            if (craftingLevel >= 33 && craftingLevel < 42) {
+                                vial();
+                                Timing.waitCondition(() -> !Interfaces.isInterfaceSubstantiated(craftingInterface), General.random(2500, 4100));
+                            }
+
+                            if (craftingLevel >= 42 && craftingLevel < 46) {
+                                fishbowl();
+                                Timing.waitCondition(() -> !Interfaces.isInterfaceSubstantiated(craftingInterface), General.random(2500, 4100));
+                            }
+
+                            if (craftingLevel >= 46) {
+                                orb();
+                                Timing.waitCondition(() -> !Interfaces.isInterfaceSubstantiated(craftingInterface), General.random(2500, 4100));
+                            }
                         }
                     }
 
 
 
-                break;
+                    break;
 
-            case IDLING:
 
+
+
+            case ANIMATING:
+                performTimedActions();
                 break;
 
             case WITHDRAW_REQUIRED:
                 withdrawStartingItems();
                 break;
-
-
-            case AIRBATTLESTAFF:
-
-
-                currentlyPerformingAction = continuouslyAnimating();
-                if (!currentlyPerformingAction && !Interfaces.isInterfaceSubstantiated(270)) {
-                    combineBattlestaff();
-                }
-
-                if (Interfaces.isInterfaceSubstantiated(270)) {
-                    RSInterface battlestaff = Interfaces.get(270, 14);
-                    if (battlestaff != null) {
-                        if (useNumbers) {
-                            Keyboard.sendPress(KeyEvent.CHAR_UNDEFINED, KeyEvent.VK_SPACE);
-                        } else {
-                            battlestaff.click();
-                        }
-                        Timing.waitCondition(new Condition() {
-                            @Override
-                            public boolean active() {
-                                return (!Interfaces.isInterfaceSubstantiated(270));
-                            }
-                        }, General.random(2000, 3000));
-                    }
-
-                }
-
-                break;
-
         }
 
         return 50;
@@ -558,63 +352,30 @@ public class main extends Script implements Painting, Arguments {
             openBank();
         } else {
             if (args.equals("leather")) {
-                if (bankHasNeedle() && hasNeedle() && hasThread()) {
-                    if (Banking.withdraw(1, "Needle")) {
-                        Timing.waitCondition(new Condition() {
-                            @Override
-                            public boolean active() {
-                                return Inventory.find("Needle").length > 0;
-                            }
-                        }, General.random(1100, 1900));
-                        closeBank();
-                    }
-                }
-                if (bankHasThread() && !hasThread() && hasNeedle()) {
-                    if (Banking.withdraw(0, "Thread")) {
-                        Timing.waitCondition(new Condition() {
-                            @Override
-                            public boolean active() {
-                                return Inventory.find("Thread").length > 0;
-                            }
-                        }, General.random(1100, 1900));
-                        closeBank();
-                    }
-                }
-                if (bankHasNeedle() && !hasNeedle() && bankHasThread() && !hasThread()) {
-                    if (Banking.withdraw(1, "Needle")) {
-                        Timing.waitCondition(new Condition() {
-                            @Override
-                            public boolean active() {
-                                return Inventory.find("Needle").length > 0;
-                            }
-                        }, General.random(1100, 1900));
-
-                    }
-                    General.sleep(1200, 1800);
-                    if (Banking.withdraw(0, "Thread")) {
-                        Timing.waitCondition(new Condition() {
-                            @Override
-                            public boolean active() {
-                                return Inventory.find("Thread").length > 0;
-                            }
-                        }, General.random(1100, 1900));
-
-                    }
+                if (hasItem(Items.LEATHER.requiredOne) && hasItem(Items.LEATHER.requiredTwo)){
                     closeBank();
+                } else {
+                    if (bankHasItem(Items.LEATHER.requiredOne) && !hasItem(Items.LEATHER.requiredOne)) {
+                        if (Banking.withdraw(1, Items.LEATHER.requiredOne)) {
+                            Timing.waitCondition(() -> Inventory.find(Items.LEATHER.requiredOne).length > 0, General.random(2500, 4100));
+                        }
+                    }
+                    if (bankHasItem(Items.LEATHER.requiredTwo) && !hasItem(Items.LEATHER.requiredTwo)) {
+                        if (Banking.withdraw(0, Items.LEATHER.requiredTwo)) {
+                            Timing.waitCondition(() -> Inventory.find(Items.LEATHER.requiredTwo).length > 0, General.random(2500, 4100));
+                        }
+                    }
                 }
             }
             if (args.equals("glass")) {
-                if (!hasPipe() && bankHasPipe()) {
-                    if (Banking.withdraw(1, "Glassblowing pipe")) {
-                        Timing.waitCondition(new Condition() {
-                            @Override
-                            public boolean active() {
-                                return Inventory.find("Glassblowing pipe").length > 0;
-                            }
-                        }, General.random(1100, 1900));
-
-                    }
+                if (hasItem(Items.GLASS.requiredOne)){
                     closeBank();
+                } else {
+                    if (bankHasItem(Items.GLASS.requiredOne) && !hasItem(Items.GLASS.requiredOne)) {
+                        if (Banking.withdraw(1, Items.GLASS.requiredOne)) {
+                            Timing.waitCondition(() -> Inventory.find(Items.GLASS.requiredOne).length > 0, General.random(2500, 4100));
+                        }
+                    }
                 }
             }
 
@@ -624,176 +385,63 @@ public class main extends Script implements Painting, Arguments {
 
 
     public enum State {
-        BANKING,
-        IDLING,
-        LEATHER, WITHDRAW, GLASS, DHIDE, WITHDRAW_REQUIRED, GEMS, AIRBATTLESTAFF
+        HANDLE_BANK, WITHDRAW_REQUIRED, ANIMATING, WITHDRAW_MATS, HANDLING_INTERFACES;
     }
 
     private State getState() {
-
-
-        boolean isBankOpen = isBankOpen();
-        boolean hasLeather = hasLeather();
-        boolean hasRequiredLeather = hasRequiredLeather();
-        boolean hasGlass = hasGlass();
-        boolean hasRequiredGlass = hasRequiredGlass();
-
-        boolean hasBattlestaff = hasBattlestaff();
-        boolean hasAirOrb = hasAirOrb();
-
-
-        if (args.equals("battlestaff")) {
-            if (!isBankOpen && !hasBattlestaff && !hasAirOrb)
-                return State.BANKING;
-            else if (!isBankOpen && hasBattlestaff && hasAirOrb)
-                return State.AIRBATTLESTAFF;
-            else if (isBankOpen && !hasBattlestaff && !hasAirOrb)
-                return State.WITHDRAW;
-        }
-
-        if (args.equals("leather")) {
-            if (!hasRequiredLeather) {
-                return State.WITHDRAW_REQUIRED;
-            }
-            if (hasRequiredLeather && hasLeather && !isBankOpen) {
-                return State.LEATHER;
-            }
-            if (hasRequiredLeather && isBankOpen && !hasLeather) {
-                return State.WITHDRAW;
-            }
-            if (!isBankOpen && !hasLeather && hasRequiredLeather) {
-                return State.BANKING;
+        if (!hasRequired()){
+           return State.WITHDRAW_REQUIRED;
+        } else {
+            if (!Banking.isBankScreenOpen()){
+                if (hasMats()){
+                    if (continuouslyAnimating()){
+                        return State.ANIMATING;
+                    }
+                    return State.HANDLING_INTERFACES;
+                }  else {
+                    return State.HANDLE_BANK;
+                }
+            } else {
+                if (hasMats()){
+                    return State.HANDLE_BANK;
+                } else {
+                    return State.WITHDRAW_MATS;
+                }
             }
         }
-
-        if (args.equals("glass")) {
-            if (!hasRequiredGlass) {
-                return State.WITHDRAW_REQUIRED;
-            }
-            if (hasRequiredGlass && hasGlass && !isBankOpen) {
-                return State.GLASS;
-            }
-            if (hasRequiredGlass && isBankOpen && !hasGlass) {
-                return State.WITHDRAW;
-            }
-            if (!isBankOpen && !hasGlass && hasRequiredGlass) {
-                return State.BANKING;
-            }
-        }
-
-        if (continuouslyAnimating()) {
-            return State.IDLING;
-        } else return State.IDLING;
     }
 
-
-    private boolean isBankOpen() {
-        return Banking.isBankScreenOpen();
-    }
 
     private boolean closeBank() {
         if (Banking.isBankScreenOpen()) {
             if (useNumbers) {
                 if (escapeCloseInterfacesEnabled()) {
                     Keyboard.sendPress(KeyEvent.CHAR_UNDEFINED, KeyEvent.VK_ESCAPE);
+                    Timing.waitCondition(() -> !Banking.isBankScreenOpen(), General.random(2500, 4100));
 
-                    Timing.waitCondition(new Condition() {
-                        @Override
-                        public boolean active() {
-                            return !Banking.isBankScreenOpen();
-                        }
-                    }, General.random(1200, 1700));
                 }
             } else {
                 Banking.close();
-                Timing.waitCondition(new Condition() {
-                    @Override
-                    public boolean active() {
-                        return !Banking.isBankScreenOpen();
-                    }
-                }, General.random(1200, 1700));
+                Timing.waitCondition(() -> !Banking.isBankScreenOpen(), General.random(2500, 4100));
+
             }
         }
         return true;
     }
 
     public boolean openBank() {
-        if (!Banking.openBank()) {
-            Banking.openBankBooth();
-            Timing.waitCondition(new Condition() {
-                @Override
-                public boolean active() {
-                    return !Banking.isBankScreenOpen();
-                }
-            }, General.random(1200, 1900));
+        if (!Banking.isBankScreenOpen()){
+            Banking.openBank();
+            Timing.waitCondition(() -> Banking.isBankScreenOpen(), General.random(2500, 4100));
         }
-        return Banking.isBankScreenOpen();
+        return true;
     }
 
-
-
-    private boolean combine() {
-        RSItem[] needle = Inventory.find("Needle");
-        RSItem[] thread = Inventory.find("Thread");
-        RSItem[] leather = Inventory.find("Leather");
-        if (needle.length > 0 && leather.length > 0 && thread.length > 0) {
-            return needle[0].click() && findNearestToMouse("Leather")[0].click();
-        } else return false;
-    }
-
-    private boolean combine2() {
-        RSItem[] glassblowingPipe = Inventory.find("Glassblowing pipe");
-        if (hasGlass()) {
-            return glassblowingPipe[0].click() && findNearestToMouse("Molten glass")[0].click();
-        } else return false;
-    }
-
-
-
-    private boolean combineBattlestaff() {
-        RSItem[] staff = Inventory.find("Battlestaff");
-        RSItem[] orb = Inventory.find("Air orb");
-
-        if (staff.length > 0 && orb.length > 0) {
-            return staff[staff.length - 1].click("Use") && findNearestToMouse("Air orb")[0].click();
-        } else return false;
-    }
 
     public static boolean continuouslyAnimating() {
-        return Timing.waitCondition(new Condition() {
-            @Override
-            public boolean active() {
-                return Player.getAnimation() != -1;
-            }
-        }, General.random(2000, 3000));
-
+        return Timing.waitCondition(() -> Player.getAnimation() != -1, General.random(1200, 1500));
     }
 
-    public static boolean canCloseBank() {
-        return Timing.waitCondition(new Condition() {
-            @Override
-            public boolean active() {
-                return Inventory.getCount("Leather") > 0;
-            }
-        }, General.random(1200, 1900));
-    }
-
-
-    public static boolean canCloseBankGems() {
-        return Timing.waitCondition(new Condition() {
-            @Override
-            public boolean active() {
-                return Inventory.getCount("Uncut topaz", "Uncut opal", "Uncut jade", "Uncut sapphire", "Uncut emerald", "Uncut ruby", "Uncut diamond", "Uncut dragonstone") > 0;
-            }
-        }, General.random(1200, 1900));
-    }
-
-
-    public static RSItem[] findNearestToMouse(Filter<RSItem> filter) {
-        RSItem[] items = Inventory.find(filter);
-        Arrays.sort(items, closestToFarthest);
-        return items;
-    }
 
     private static Point getCenterPoint(RSItem i) {
         Rectangle r = i.getArea();
@@ -815,52 +463,28 @@ public class main extends Script implements Painting, Arguments {
     };
 
     public static RSItem[] findNearestToMouse(String... names) {
-        RSItem[] items = Inventory.find(names);
-        Arrays.sort(items, closestToFarthest);
-        return items;
+        RSItem[] Items = Inventory.find(names);
+        Arrays.sort(Items, closestToFarthest);
+        return Items;
     }
 
-    public static RSItem[] findNearestToMouseBank(String... names) {
-        RSItem[] banks = Banking.find(names);
-        Arrays.sort(banks, closestToFarthest);
-        return banks;
-    }
-
-    public static RSItem[] withdrawnearesttoMouse(int amount, String... names) {
-        RSItem[] banks = Banking.find(names);
-        Arrays.sort(banks, closestToFarthest);
-        return banks;
-
-    }
-
-    public static RSItem[] findNearestToMouse() {
-        RSItem[] items = Inventory.getAll();
-        Arrays.sort(items, closestToFarthest);
-        return items;
-    }
 
 
     public static boolean escapeCloseInterfacesEnabled() {
         return RSVarBit.get(ESCAPE_CLOSE_INTERFACE_VARBIT).getValue() == 1;
     }
 
-    private enum items {
-
+    private enum Items {
         LEATHER("Leather", "Needle", "Thread", ""),
-        GLASS("Molten glass", "Glassblowing pipe", "", ""),
-        GEM("Uncut sapphire", "Chisel", "", ""),
-        STAFF("Battlestaff", "Air orb", "", "Air battlestaff");
-
-
-        // add rest
+        GLASS("Molten glass", "Glassblowing pipe", "", "");
 
         final String material;
         final String requiredOne;
         final String requiredTwo;
         final String finalItem;
-        static final items[] types = {LEATHER, GLASS, GEM, STAFF};
+        static final Items[] types = {LEATHER, GLASS, };
 
-        items(String material, String requiredOne, String requiredTwo, String finalItem) {
+        Items(String material, String requiredOne, String requiredTwo, String finalItem) {
             this.material = material;
             this.requiredOne = requiredOne;
             this.requiredTwo = requiredTwo;
@@ -873,7 +497,6 @@ public class main extends Script implements Painting, Arguments {
         }
 
         private String requiredOne() {
-
             return requiredOne;
         }
 
@@ -882,7 +505,6 @@ public class main extends Script implements Painting, Arguments {
         }
 
         private String finalItem() {
-
             return finalItem;
         }
     }
@@ -1074,32 +696,25 @@ public class main extends Script implements Painting, Arguments {
     }
 
 
-
-    public static boolean setKeybindingDefault(boolean esc){
-        if(openControlsOptionsTab()){
-
-            if(openKeybinding()){
-
+    //Gross stolen code
+    public static boolean setKeybindingDefault(boolean esc) {
+        if (openControlsOptionsTab()) {
+            if (openKeybinding()) {
                 RSInterface keybindingMaster = Interfaces.get(121);
-                if(keybindingMaster!=null){
+                if (keybindingMaster != null) {
                     RSInterface defaultButton = keybindingMaster.getChild(104);
-                    if(defaultButton!=null&&!defaultButton.isHidden()) {
+                    if (defaultButton != null && !defaultButton.isHidden()) {
                         if (defaultButton.click("Restore Defaults")) {
                             General.sleep(750);
-                            RSInterface top = Interfaces.get(121,1);
-                            if(top!=null&&!top.isHidden()){
+                            RSInterface top = Interfaces.get(121, 1);
+                            if (top != null && !top.isHidden()) {
                                 RSInterface close = top.getChild(11);
                                 RSInterface escToggle = keybindingMaster.getChild(103);
                                 if (escToggle != null && !escToggle.isHidden()) {
                                     if (esc) {
                                         if (escToggle.getTextureID() == 697) {
-                                            if(escToggle.click()) {
-                                                Timing.waitCondition(new Condition() {
-                                                    @Override
-                                                    public boolean active() {
-                                                        return escToggle.getTextureID() == 699;
-                                                    }
-                                                }, 3500);
+                                            if (escToggle.click()) {
+                                                Timing.waitCondition(() -> escToggle.getTextureID() == 699, General.random(2500, 4100));
                                             }
                                         }
                                         if (close != null && !close.isHidden()) {
@@ -1108,12 +723,7 @@ public class main extends Script implements Painting, Arguments {
                                     } else {
                                         if (escToggle.getTextureID() == 699) {
                                             if (escToggle.click()) {
-                                                Timing.waitCondition(new Condition() {
-                                                    @Override
-                                                    public boolean active() {
-                                                        return escToggle.getTextureID() == 697;
-                                                    }
-                                                }, 3500);
+                                                Timing.waitCondition(() -> escToggle.getTextureID() == 697, General.random(2500, 4100));
                                             }
                                         }
                                         if (close != null && !close.isHidden()) {
@@ -1131,26 +741,20 @@ public class main extends Script implements Painting, Arguments {
     }
 
     private static boolean openKeybinding() {
-        if(Interfaces.get(121)!=null){
+        if (Interfaces.get(121) != null) {
             return true;
         }
         if (openControlsOptionsTab()) {
             RSInterface openKeybinding = Interfaces.get(261, 83);
             if (openKeybinding != null && !openKeybinding.isHidden()) {
                 if (openKeybinding.click("Keybinding")) {
-                    Timing.waitCondition(new Condition() {
-                        @Override
-                        public boolean active() {
-                            return Interfaces.get(121) != null;
-                        }
-                    }, 3000);
-                    return Interfaces.get(121)!=null;
+                    Timing.waitCondition(() -> Interfaces.get(121) != null, General.random(2500, 4100));
+                    return Interfaces.get(121) != null;
                 }
             }
         }
         return false;
     }
-
 
 
     private static boolean openControlsOptionsTab() {
@@ -1160,14 +764,8 @@ public class main extends Script implements Painting, Arguments {
                 RSInterface controlsButton = topOptions.getChild(6);
                 if (controlsButton != null) {
                     if (controlsButton.getTextureID() != 762) {
-                        if(controlsButton.click("Controls")) {
-                            Timing.waitCondition(new Condition() {
-                                @Override
-                                public boolean active() {
-                                    General.sleep(100);
-                                    return controlsButton.getTextureID() == 762;
-                                }
-                            }, 2000);
+                        if (controlsButton.click("Controls")) {
+                            Timing.waitCondition(() -> controlsButton.getTextureID() == 762, General.random(2500, 4100));
                             return controlsButton.getTextureID() == 762;
                         }
                     } else {
@@ -1179,6 +777,46 @@ public class main extends Script implements Painting, Arguments {
         return false;
     }
 
+
+    private boolean hasItem (String ItemName){
+        RSItem[] items = Inventory.find(ItemName);
+        return items.length > 0 && items[0]!=null;
+    }
+
+    private boolean bankHasItem (String ItemName){
+        RSItem[] items = Banking.find(ItemName);
+        return items.length > 0 && items[0]!=null;
+    }
+
+    public void performTimedActions() {
+
+
+        if (abcInstance.shouldCheckXP()) {
+            abcInstance.checkXP();
+            General.sleep(General.randomSD(750, 1500, 1000, 150)); // sleep makes sure it checks xp longer.
+        }
+
+        if (abcInstance.shouldExamineEntity())
+            abcInstance.examineEntity();
+
+        if (abcInstance.shouldMoveMouse())
+            abcInstance.moveMouse();
+
+        if (abcInstance.shouldPickupMouse())
+            abcInstance.pickupMouse();
+
+        if (abcInstance.shouldRightClick())
+            abcInstance.rightClick();
+
+        if (abcInstance.shouldRotateCamera())
+            abcInstance.rotateCamera();
+
+
+        if (abcInstance.shouldLeaveGame())
+
+            abcInstance.leaveGame();
+
+    }
 
 
 }
