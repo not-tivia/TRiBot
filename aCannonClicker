@@ -438,11 +438,12 @@ public class main extends Script implements Painting, MessageListening07, Breaki
     @Override
     public void serverMessageReceived(String arg0) {
 
-        /*
-        if (arg0.equals("Your cannon has ran out of cannonballs")) {
 
+        if (arg0.equals("That isn't your cannon!")) {
+            General.println("Ending because we missclicked on someone elses cannon somehow");
+            continuerunning = false;
         }
 
-         */
+
     }
 }
