@@ -4,14 +4,18 @@ import org.tribot.api.Clicking;
 import org.tribot.api.General;
 import org.tribot.api.Timing;
 import org.tribot.api.input.Mouse;
-import org.tribot.api.types.generic.Condition;
+
 import org.tribot.api.util.abc.ABCUtil;
 import org.tribot.api2007.*;
 import org.tribot.api2007.ext.Filters;
 import org.tribot.api2007.types.*;
 import org.tribot.script.Script;
 import org.tribot.script.ScriptManifest;
+import org.tribot.script.interfaces.Breaking;
+import org.tribot.script.interfaces.MessageListening07;
 import org.tribot.script.interfaces.Painting;
+
+
 import scripts.cannonClicker.dax_api.api_lib.DaxWalker;
 import scripts.cannonClicker.dax_api.api_lib.models.DaxCredentials;
 import scripts.cannonClicker.dax_api.api_lib.models.DaxCredentialsProvider;
@@ -22,7 +26,7 @@ import java.text.NumberFormat;
 @ScriptManifest(authors = {"adamhackz"}, category = "Adamseries", name = "aCannonClicker", description = "i Click cannons wiv my wittle wittle mouse", version = (0.02))
 
 
-public class main extends Script implements Painting {
+public class main extends Script implements Painting, MessageListening07, Breaking {
 
     private State scriptState;
 
@@ -41,7 +45,7 @@ public class main extends Script implements Painting {
     private long LAST_LOAD = System.currentTimeMillis();
     private int LOAD_TIME = General.randomSD(1200, 65000, 33100, 31900);
 
-    RSGroundItem[] lootlist = GroundItems.findNearest("Torstal seed", "Snapdragon seed", "Ranarr seed", "Long bone", "Curved bone");
+
 
 
     @Override
@@ -53,7 +57,7 @@ public class main extends Script implements Painting {
         int distance = Player.getPosition().distanceTo(CANNON_TILE);
 
 
-        //g.drawString("State: " + getState(), 5, 80);
+        g.drawString("State: " + getState(), 5, 80);
         g.drawString("Running for: " + Timing.msToString(runtime), 5, 80);
         g.drawString("XP gained: " + (dumbass), 5, 100);
         g.drawString("State: " + scriptState, 5, 120);
@@ -99,16 +103,21 @@ public class main extends Script implements Painting {
         switch (scriptState) {
 
             case HOPPING_WORLDS:
-                if (WorldHopperInGame.On()) {
-                    int world = WorldHopper.getRandomWorld(true, false);
-                    if (world != WorldHopper.getWorld()) {
-                        WorldHopper.changeWorld(world);
+                RSInterface ingame = Interfaces.get(69,2);
+                if (Interfaces.isInterfaceSubstantiated(ingame)) {
+                    String text = ingame.getText();
+                    if (text != null && !text.isEmpty()) {
+                        int world = WorldHopper.getRandomWorld(true, false);
+                        if (world != WorldHopper.getWorld()) {
+                            WorldHopper.changeWorld(world);
+                        }
                     }
                 } else {
                     if (WorldHopper.openWorldSelect()) {
-                        Timing.waitCondition(() -> WorldHopperInGame.On(), General.random(2500, 4100));
+                        Timing.waitCondition(() -> Interfaces.isInterfaceSubstantiated(ingame), General.random(2500, 4100));
                     }
                 }
+
 
                 break;
 
@@ -119,6 +128,7 @@ public class main extends Script implements Painting {
                         General.println("Needs to repair cannon");
                         if (Clicking.click("Repair", brokenCannon[0])) {
                             Timing.waitCondition(() -> brokenCannon.length < 1, General.random(3000, 5000));
+
                         }
                     }
                 } else {
@@ -188,11 +198,11 @@ public class main extends Script implements Painting {
                                     if (cannon[0].getDefinition().getActions()[0].contains("Fire")) {
                                         General.println("Needs to load cannon");
                                         if (System.currentTimeMillis() - LAST_LOAD >= LOAD_TIME) {
-                                            if (Clicking.click("Fire", cannon[0])) {
-                                                General.sleep(LOAD_TIME);
-                                                LAST_LOAD = System.currentTimeMillis();
-                                                LOAD_TIME = General.randomSD(1200, 65000, 33100, 31900);
-                                            }
+                                               if (Clicking.click("Fire", cannon[0])) {
+                                                   General.sleep(LOAD_TIME);
+                                                   LAST_LOAD = System.currentTimeMillis();
+                                                   LOAD_TIME = General.randomSD(1200, 65000, 33100, 31900);
+                                                }
                                         } else {
                                             performTimedActions();
                                         }
@@ -287,6 +297,7 @@ public class main extends Script implements Painting {
 
         if (inGame()) {
             if (cannonPlaced) {
+                RSGroundItem[] lootlist = GroundItems.findNearest("Torstal seed", "Snapdragon seed", "Ranarr seed", "Long bone", "Curved bone");
                 if (lootlist.length > 0) {
                     if (PathFinding.canReach(lootlist[0].getPosition(), false)) {
                         return State.LOOT;
@@ -381,5 +392,57 @@ public class main extends Script implements Painting {
 
     }
 
+    @Override
+    public void onBreakEnd() {
 
+    }
+
+    @Override
+    public void onBreakStart(long l) {
+        RSObject[] cannon = Objects.find(10, "Dwarf multicannon");
+        if (cannon.length > 0){
+            if (Clicking.click("Pick-up", cannon[0])){
+                Timing.waitCondition(() -> hasCannonFurnace(), General.random(2500, 8000));
+                if (hasCannonFurnace()) {
+                    cannonPlaced = false;
+                }
+            }
+        }
+    }
+
+    @Override
+    public void clanMessageReceived(String arg0, String arg1) {
+        // TODO Auto-generated method stub
+    }
+
+    @Override
+    public void personalMessageReceived(String arg0, String arg1) {
+
+    }
+
+    @Override
+    public void tradeRequestReceived(String arg0) {
+        // TODO Auto-generated method stub
+    }
+
+    @Override
+    public void duelRequestReceived(String arg0, String arg1) {
+        // TODO Auto-generated method stub
+    }
+
+    @Override
+    public void playerMessageReceived(String arg0, String arg1) {
+        // TODO Auto-generated method stub
+    }
+
+    @Override
+    public void serverMessageReceived(String arg0) {
+
+        /*
+        if (arg0.equals("Your cannon has ran out of cannonballs")) {
+
+        }
+
+         */
+    }
 }
