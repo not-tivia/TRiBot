@@ -369,15 +369,25 @@ public class main extends Script implements Painting, Arguments {
                 if (hasItem(Items.LEATHER.requiredOne) && hasItem(Items.LEATHER.requiredTwo)){
                     closeBank();
                 } else {
-                    if (bankHasItem(Items.LEATHER.requiredOne) && !hasItem(Items.LEATHER.requiredOne)) {
-                        if (Banking.withdraw(1, Items.LEATHER.requiredOne)) {
-                            Timing.waitCondition(() -> Inventory.find(Items.LEATHER.requiredOne).length > 0, General.random(2500, 4100));
+                    if (bankHasItem(Items.LEATHER.requiredOne)) {
+                        if (!hasItem(Items.LEATHER.requiredOne)) {
+                            if (Banking.withdraw(1, Items.LEATHER.requiredOne)) {
+                                Timing.waitCondition(() -> Inventory.find(Items.LEATHER.requiredOne).length > 0, General.random(2500, 4100));
+                            }
                         }
+                    }  else {
+                        General.println("Does not have required");
+                        continuerunning = false;
                     }
-                    if (bankHasItem(Items.LEATHER.requiredTwo) && !hasItem(Items.LEATHER.requiredTwo)) {
-                        if (Banking.withdraw(0, Items.LEATHER.requiredTwo)) {
-                            Timing.waitCondition(() -> Inventory.find(Items.LEATHER.requiredTwo).length > 0, General.random(2500, 4100));
+                    if (bankHasItem(Items.LEATHER.requiredTwo)){
+                        if (!hasItem(Items.LEATHER.requiredTwo)) {
+                            if (Banking.withdraw(0, Items.LEATHER.requiredTwo)) {
+                                Timing.waitCondition(() -> Inventory.find(Items.LEATHER.requiredTwo).length > 0, General.random(2500, 4100));
+                            }
                         }
+                    } else {
+                        General.println("Does not have required");
+                        continuerunning = false;
                     }
                 }
             }
@@ -385,10 +395,15 @@ public class main extends Script implements Painting, Arguments {
                 if (hasItem(Items.GLASS.requiredOne)){
                     closeBank();
                 } else {
-                    if (bankHasItem(Items.GLASS.requiredOne) && !hasItem(Items.GLASS.requiredOne)) {
-                        if (Banking.withdraw(1, Items.GLASS.requiredOne)) {
-                            Timing.waitCondition(() -> Inventory.find(Items.GLASS.requiredOne).length > 0, General.random(2500, 4100));
+                    if (bankHasItem(Items.GLASS.requiredOne)){
+                        if (!hasItem(Items.GLASS.requiredOne)) {
+                            if (Banking.withdraw(1, Items.GLASS.requiredOne)) {
+                                Timing.waitCondition(() -> Inventory.find(Items.GLASS.requiredOne).length > 0, General.random(2500, 4100));
+                            }
                         }
+                    } else {
+                        General.println("Does not have required");
+                        continuerunning = false;
                     }
                 }
             }
