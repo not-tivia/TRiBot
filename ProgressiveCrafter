@@ -1,10 +1,14 @@
 package scripts.progressiveCrafter;
 
+import org.tribot.api.Clicking;
+import org.tribot.api.DynamicClicking;
 import org.tribot.api.General;
 import org.tribot.api.Timing;
 import org.tribot.api.input.Keyboard;
 import org.tribot.api.input.Mouse;
+import org.tribot.api.util.abc.ABCProperties;
 import org.tribot.api.util.abc.ABCUtil;
+import org.tribot.api.util.abc.preferences.OpenBankPreference;
 import org.tribot.api2007.*;
 import org.tribot.api2007.ext.Filters;
 import org.tribot.api2007.types.RSInterface;
@@ -15,12 +19,15 @@ import org.tribot.script.ScriptManifest;
 import org.tribot.script.interfaces.Arguments;
 import org.tribot.script.interfaces.Painting;
 
+
 import java.awt.*;
 import java.awt.event.KeyEvent;
 import java.text.NumberFormat;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
+
+
 
 @ScriptManifest(authors = {"adamhackz"}, category = "Crafting", name = "ProgressiveCrafter", description = "progressive crafter, use args leather or glass", version = (12))
 
@@ -36,7 +43,6 @@ public class main extends Script implements Painting, Arguments {
     private boolean currentlyPerformingAction = false;
     private boolean useNumbers = false;
     private static final int ESCAPE_CLOSE_INTERFACE_VARBIT = 4681;
-    private boolean setEscBank = false;
 
     private State scriptState;
 
@@ -44,7 +50,7 @@ public class main extends Script implements Painting, Arguments {
 
     private ABCUtil abcInstance = new ABCUtil();
 
-    
+
 
 
     @Override
@@ -57,9 +63,9 @@ public class main extends Script implements Painting, Arguments {
     }
 
 
-
     private boolean onStart() {
         if (continuerunning) {
+
             General.println("Script Started... Progressive Crafter V12");
             General.println("Method type: " + args);
             if (General.getTRiBotUsername().equals("filthyfrank")) {
@@ -129,14 +135,18 @@ public class main extends Script implements Painting, Arguments {
     }
 
 
+
+
     private int loop() {
         scriptState = getState();
         General.sleep(50);
+
         switch (scriptState) {
 
 
             case HANDLE_BANK:
                 if (!hasMats()) {
+
                     if (Banking.openBank()) {
                         Timing.waitCondition(() -> Banking.isBankScreenOpen(), General.random(2500, 4100));
                     }
@@ -152,7 +162,7 @@ public class main extends Script implements Painting, Arguments {
                     RSItem[] material = Banking.find(Items.LEATHER.material);
                     if (material.length < 1) {
                         continuerunning = false;
-                        General.println("Out of " + material[0].getDefinition().getName());
+                        General.println("Out of " + Items.LEATHER.material);
                     } else
                         continuerunning = true;
                     RSItem[] completeditem = Inventory.find("Unpowered orb", "Beer glass", "Candle lantern", "Oil lamp", "Oil lantern", "Vial", "Fishbowl", "Glass orb", "Sapphire", "Ruby", "Emerald", "Diamond", "Coif");
@@ -161,7 +171,6 @@ public class main extends Script implements Painting, Arguments {
                     RSItem[] materialInv = Inventory.find(Items.LEATHER.material);
                     RSItem[] materialBank = Banking.find(Items.LEATHER.material);
 
-                    //if has coif or leather item, then deposit all except required 1 and 2
                     if (completeditem.length > 0 || leatheritem.length > 0){
                         if (materialInv.length < 1){
                             Banking.depositAllExcept(Items.LEATHER.requiredOne, Items.LEATHER.requiredTwo);
@@ -180,6 +189,7 @@ public class main extends Script implements Painting, Arguments {
                                 }
                             } else {
                                 closeBank();
+
                             }
                         }
                     }
@@ -189,7 +199,7 @@ public class main extends Script implements Painting, Arguments {
                     RSItem[] material = Banking.find(Items.GLASS.material);
                     if (material.length < 1) {
                         continuerunning = false;
-                        General.println("Out of " + material[0].getDefinition().getName());
+                        General.println("Out of " + Items.GLASS.material);
                     } else
                         continuerunning = true;
                     RSItem[] completeditem = Inventory.find("Unpowered orb", "Beer glass", "Candle lantern", "Oil lamp", "Oil lantern", "Vial", "Fishbowl", "Glass orb", "Sapphire", "Ruby", "Emerald", "Diamond", "Coif");
@@ -198,7 +208,6 @@ public class main extends Script implements Painting, Arguments {
                     RSItem[] materialInv = Inventory.find(Items.GLASS.material);
                     RSItem[] materialBank = Banking.find(Items.GLASS.material);
 
-                    //if has coif or leather item, then deposit all except required 1 and 2
                     if (completeditem.length > 0 || leatheritem.length > 0){
                         if (materialInv.length < 1){
                             Banking.depositAllExcept(Items.GLASS.requiredOne, Items.GLASS.requiredTwo);
@@ -217,6 +226,7 @@ public class main extends Script implements Painting, Arguments {
                                 }
                             } else {
                                 closeBank();
+
                             }
                         }
                     }
@@ -245,6 +255,7 @@ public class main extends Script implements Painting, Arguments {
                             if (craftingLevel < 7) {
                                 gloves();
                                 Timing.waitCondition(() -> !Interfaces.isInterfaceSubstantiated(craftingInterface), General.random(2500, 4100));
+
                             }
 
                             if (craftingLevel >= 7 && craftingLevel < 9) {
@@ -278,6 +289,7 @@ public class main extends Script implements Painting, Arguments {
                                 //component only returns empty when in ftp
                                 if (!coif.getComponentName().isEmpty()) {
                                     coif();
+
                                 } else {
                                     leatherchaps();
                                 }
@@ -346,6 +358,8 @@ public class main extends Script implements Painting, Arguments {
 
         return 50;
     }
+
+
 
     private boolean withdrawStartingItems() {
         if (!Banking.isBankScreenOpen()) {
@@ -788,8 +802,13 @@ public class main extends Script implements Painting, Arguments {
         return items.length > 0 && items[0]!=null;
     }
 
+
+
+
     public void performTimedActions() {
 
+        if (abcInstance.shouldCheckTabs())
+            abcInstance.checkTabs();
 
         if (abcInstance.shouldCheckXP()) {
             abcInstance.checkXP();
@@ -797,7 +816,7 @@ public class main extends Script implements Painting, Arguments {
         }
 
         if (abcInstance.shouldExamineEntity())
-            abcInstance.examineEntity();
+        abcInstance.examineEntity();
 
         if (abcInstance.shouldMoveMouse())
             abcInstance.moveMouse();
@@ -806,17 +825,24 @@ public class main extends Script implements Painting, Arguments {
             abcInstance.pickupMouse();
 
         if (abcInstance.shouldRightClick())
-            abcInstance.rightClick();
+        abcInstance.rightClick();
 
         if (abcInstance.shouldRotateCamera())
             abcInstance.rotateCamera();
 
 
         if (abcInstance.shouldLeaveGame())
-
             abcInstance.leaveGame();
 
+
     }
+
+
+
+
+
+
+
 
 
 }
