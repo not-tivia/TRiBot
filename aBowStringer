@@ -1,17 +1,16 @@
 package scripts.aBowStringer;
 
-import org.tribot.TRiBot;
+
 import org.tribot.api.Clicking;
 
 import org.tribot.api.General;
 import org.tribot.api.Timing;
 
 import org.tribot.api.input.Mouse;
-import org.tribot.api.types.generic.Condition;
-import org.tribot.api.util.abc.ABCProperties;
+
 import org.tribot.api.util.abc.ABCUtil;
 import org.tribot.api2007.*;
-import org.tribot.api2007.ext.Filters;
+
 import org.tribot.api2007.types.*;
 import org.tribot.script.Script;
 import org.tribot.script.ScriptManifest;
@@ -65,13 +64,12 @@ public class Main extends Script implements Painting, Arguments {
                 return new DaxCredentials("sub_DPjXXzL5DeSiPf", "PUBLIC-KEY");
             }
         });
-        Mouse.setSpeed(General.random(240,360));
+        Mouse.setSpeed(General.random(87,360));
     }
 
     private boolean onStart(){
-        //Hello fellas
-
-       return true;
+            daxStart();
+        return true;
     }
 
     @Override
@@ -353,19 +351,19 @@ public class Main extends Script implements Painting, Arguments {
             if (spinner!=null){
                 if (bowstring == null){
                     if (Clicking.click("Spin",spinner)){
-                        Timing.waitCondition(() -> bowstring!=null, General.random(600, 1100));
+                        Timing.waitCondition(() -> bowstring!=null, General.random(1200, 2100));
 
                     }
                 } else {
                     if (currentResource == "Flax") {
                         if (Clicking.click(bowstring)) {
-                            Timing.waitCondition(() -> !continuouslyAnimating(), General.random(600, 1100));
+                            Timing.waitCondition(() -> continuouslyAnimating(), General.random(1200, 2100));
 
                         }
                     } else {
                         if (currentResource == "Wool"){
                             if (Clicking.click(ballofwool)) {
-                                Timing.waitCondition(() -> !continuouslyAnimating(), General.random(600, 1100));
+                                Timing.waitCondition(() -> continuouslyAnimating(), General.random(1200, 2100));
                             }
                         }
                     }
@@ -375,7 +373,7 @@ public class Main extends Script implements Painting, Arguments {
         }
 
         public static boolean continuouslyAnimating () {
-            return Timing.waitCondition(() -> Player.getAnimation()!=-1, General.random(600, 1100));
+            return Timing.waitCondition(() -> Player.getAnimation()!=-1, General.random(1200, 2100));
         }
 
 }
