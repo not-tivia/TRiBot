@@ -1,5 +1,6 @@
 package scripts.gargoyleSlayer;
 
+
 import org.tribot.api.Clicking;
 import org.tribot.api.DynamicClicking;
 import org.tribot.api.General;
@@ -16,6 +17,7 @@ import org.tribot.api2007.types.*;
 import org.tribot.script.Script;
 import org.tribot.script.ScriptManifest;
 import org.tribot.script.interfaces.Arguments;
+import org.tribot.script.interfaces.Breaking;
 import org.tribot.script.interfaces.MessageListening07;
 import org.tribot.script.interfaces.Painting;
 import scripts.gargoyleSlayer.a_helper.RunePouch;
@@ -30,19 +32,24 @@ import java.awt.*;
 import java.util.*;
 
 
-@ScriptManifest(authors = { "adamhackz" }, category = "aCustom", name = "Private Epic Slayer", description = "Insert monster name into arguments, supports all monsters, looting, cannon, ensouled heads, high alch, herb sack, gem bag, praying if no food in inventory ect", version = (1) )
+@ScriptManifest(authors = { "adamhackz" }, category = "aCustom", name = "aCombattest", description = "Yeet", version = (1) )
 
 
-public class main extends Script implements Arguments,MessageListening07,Painting {
-    String args;
+public class main extends Script implements Arguments,MessageListening07,Painting, Breaking {
+
+    public String args;
     @Override
     public void passArguments(HashMap<String, String> hashMap) {
+        General.println(hashMap);
         if (hashMap.containsKey("custom_input")) {
             args = hashMap.get("custom_input");
+
         } else if (hashMap.containsKey("autostart")) {
             args = hashMap.get("autostart");
+
         }
     }
+
 
     private boolean debug = true;
 
@@ -53,12 +60,46 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
     private RSArea AreaStrongholdAnkou = new RSArea(new RSTile(2471, 9807, 0), new RSTile(2481, 9897, 0));
     private RSArea AreaStrongholdAberrantSpectre = new RSArea(new RSTile(2461, 9787, 0), new RSTile(2450, 9796, 0));
     private RSArea areaSeagulls = new RSArea(new RSTile(3022, 3209, 0), new RSTile(3036, 3195, 0));
-    private RSArea areaFallyCows = new RSArea(new RSTile(3023, 3311, 0), new RSTile(3039, 3299, 0));
+    private RSArea areaFallyCows = new RSArea(
+            new RSTile[] {
+                    new RSTile(3021, 3312, 0),
+                    new RSTile(3021, 3297, 0),
+                    new RSTile(3032, 3297, 0),
+                    new RSTile(3033, 3298, 0),
+                    new RSTile(3038, 3298, 0),
+                    new RSTile(3038, 3297, 0),
+                    new RSTile(3041, 3297, 0),
+                    new RSTile(3044, 3300, 0),
+                    new RSTile(3044, 3312, 0),
+                    new RSTile(3041, 3314, 0),
+                    new RSTile(3023, 3314, 0)
+            }
+    );
     private RSArea areaAdventureJon = new RSArea(new RSTile(3231, 3232, 0), new RSTile(3234, 3235, 0));
     private RSArea areaLumbridgeGoblins = new RSArea(new RSTile(3240, 3242, 0), new RSTile(3263, 3227, 0));
-    private RSArea areaWildyAnkou = new RSArea(new RSTile(2958, 3765, 0), new RSTile(2994, 3740, 0));
-    private RSArea areaWildyBandits = new RSArea(new RSTile(3030, 3681, 0), new RSTile(3043, 3648, 0));
-    private RSArea areaWildyBears = new RSArea(new RSTile(3098, 3680, 0), new RSTile(3122, 3643, 0));
+    private RSArea areaKalphiteWorkers = new RSArea(new RSTile(3318, 9508, 0), new RSTile(3331, 9496, 0));
+    private RSArea areaHobgoblins = new RSArea(
+            new RSTile[] {
+                    new RSTile(2904, 3295, 0),
+                    new RSTile(2911, 3277, 0),
+                    new RSTile(2914, 3279, 0),
+                    new RSTile(2908, 3299, 0)
+            }
+    );
+    private RSArea areaGhouls = new RSArea(new RSTile(3438, 3457, 0), new RSTile(3424, 3470, 0));
+    private RSArea areaHillGiants = new RSArea(
+            new RSTile[] {
+                    new RSTile(3111, 9848, 0),
+                    new RSTile(3121, 9851, 0),
+                    new RSTile(3123, 9829, 0),
+                    new RSTile(3103, 9825, 0),
+                    new RSTile(3098, 9833, 0)
+            }
+    );
+    RSArea areaFlesh1 = new RSArea(new RSTile(2046, 5185, 0), new RSTile(2038, 5193, 0));
+    RSArea areaFlesh2 = new RSArea(new RSTile(2000, 5207, 0), new RSTile(2011, 5198, 0));
+    RSArea areaFlesh3 = new RSArea(new RSTile(1987, 5243, 0), new RSTile(1996, 5232, 0));
+
 
     private double alch_At = 0;
 
@@ -79,6 +120,7 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
     //Slayer
     private RSItem[] enchantedGem = Inventory.find("Enchanted gem");
     private RSItem[] slayerHelm = Inventory.find("Slayer helm");
+    private boolean hasSlayerTask = false;
 
     private boolean shouldCheckTask = false;
 
@@ -150,6 +192,8 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
     private boolean trainingMode = false;
     private boolean trainingAreaDecided = false;
 
+    private boolean needsToBreak = false;
+
 
 
     private int strenth1 = 0;
@@ -160,6 +204,12 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
     private int attack2 = 0;
     private int attack3 = 0;
     private int attack4 = 0;
+    //Trainer 2
+    private int attack5 = 0;
+    private int strength5 = 0;
+    private int defense5 = 0;
+
+    RSTile safeTile = null;
 
 
 
@@ -216,15 +266,27 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
         }
 
     }
+
     public  boolean inGame() {
        return Login.getLoginState() == Login.STATE.INGAME;
 
     }
 
     private boolean onStart(){
-        daxStart();
-        continueRunning = true;
-        return true;
+
+
+            if(args!= null && !args.isEmpty()) {
+                General.println("Arguments successfully passed...");
+            } else {
+                if (args.equals("trainer")){
+                    trainingMode = true;
+                    daxStart();
+                    continueRunning = true;
+                    return true;
+                }
+            }
+
+        return false;
     }
 
 
@@ -308,6 +370,13 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
         if (arg0.equals("Your cannon has ran out of cannonballs")) {
             refillCannon = true;
         }
+        if (arg0.contains("You're assigned to kill")){
+            hasSlayerTask = true;
+        }
+        if (arg0.equals("You need something new to hunt.")){
+            hasSlayerTask = false;
+        }
+
         //if (arg0.contains("You've completed")) {
        //     shouldCheckTask = true;
         //}
@@ -342,20 +411,18 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
     }
 
 
-    private void checkSlayerMonsters() {
-        if (shouldCheckTask) {
+    private void checkSlayerItems() {
             if (slayerHelm.length > 0) {
-                Clicking.click("Check", slayerHelm[0]);
+                if (Clicking.click("Check", slayerHelm[0])){
+                    General.sleep(400,1200);
+                }
                 // Timing condition check if has slayer task
-
             }
             if (enchantedGem.length > 0) {
-                Clicking.click("Check", enchantedGem[0]);
-                serverMessageReceived("You're assigned to kill");
+                if (Clicking.click("Check", enchantedGem[0])){
+                    General.sleep(400,1200);
+                }
             }
-        }
-
-
     }
 
     private void daxStart() {
@@ -367,6 +434,8 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
         });
 
     }
+
+
 
 
     private int loop() {
@@ -392,8 +461,24 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
                             }
                         }
                     } else {
-                        if (!areaFallyCows.contains(Player.getPosition())) {
-                            if (DaxWalker.walkTo(areaFallyCows.getRandomTile())) {
+                        if (attackLevel >= 40 && strengthLevel >= 40 && defenseLevel >= 40) {
+                            if (!areaFlesh1.contains(Player.getPosition())) {
+                                if (DaxWalker.walkTo(areaFallyCows.getRandomTile())) {
+                                    Timing.waitCondition(() -> !Player.isMoving(), General.random(600, 1100));
+                                }
+                            }
+                        } else {
+                            if (!areaFallyCows.contains(Player.getPosition())) {
+                                if (DaxWalker.walkTo(areaFallyCows.getRandomTile())) {
+                                    Timing.waitCondition(() -> !Player.isMoving(), General.random(600, 1100));
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    if (args.equals("Iron dragon")){
+                        if (!Slayer.IRON_DRAGON.monsterLocation.contains(Player.getPosition())) {
+                            if (DaxWalker.walkTo(Slayer.IRON_DRAGON.monsterLocation.getRandomTile())) {
                                 Timing.waitCondition(() -> !Player.isMoving(), General.random(600, 1100));
                             }
                         }
@@ -482,6 +567,13 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
                 runCheck();
                 performTimedActions();
                 checkStats();
+
+                    RSItem[] bones = Inventory.find("Bones");
+                    if (bones.length > 0){
+                        Clicking.click("Bury", bones[0]);
+                        General.sleep(600,1200);
+                    }
+
                 int attackLevel = Skills.getActualLevel(Skills.SKILLS.ATTACK);
                 int strengthLevel = Skills.getActualLevel(Skills.SKILLS.STRENGTH);
                 int defenseLevel = Skills.getActualLevel(Skills.SKILLS.DEFENCE);
@@ -499,14 +591,39 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
                         General.sleep(600,1200);
                     }
                 }
-                if (attackLevel >= 40 && strengthLevel >= 40 && defenseLevel >= 40){
+                if (attackLevel >= attack4 && strengthLevel >= strenth4 && defenseLevel >= 40){
                     trainingMode = false;
                 } else {
                     trainingMode = true;
                 }
 
+
+                RSNPC[] attackingme = NPCs.findNearest(args);
+                if ( attackingme.length > 0 && attackingme[0].isInteractingWithMe()){
+                    //RSTile attackingMeTile = new RSTile(attackingme[0].getModel().getCentrePoint().x, attackingme[0].getModel().getCentrePoint().y );
+                   // RSTile attackingMeTile2 = new RSTile();
+
+                    if (Player.getPosition().distanceTo(attackingme[0].getPosition()) <= 4) {
+                        RSArea playerArea = new RSArea(new RSTile(Player.getPosition().getX() + 3, Player.getPosition().getY() - 3), new RSTile(Player.getPosition().getX() - 3, Player.getPosition().getY() + 3));
+                        if (safeTile == null) {
+                            safeTile = playerArea.getRandomTile();
+                            General.println("Safetile was null");
+                        } else {
+                            if (safeTile.distanceTo(attackingme[0].getPosition()) >= 5 && Movement.canReach(safeTile)) {
+                                Walking.clickTileMS(safeTile, "Walk here");
+                                General.sleep(1100,2000);
+                            } else {
+                                safeTile = playerArea.getRandomTile();
+                                General.println("generating random tile");
+                            }
+                        }
+                    }
+                }
                 RSCharacter ch = Player.getRSPlayer().getInteractingCharacter();
-                if (ch != null){
+                if (ch != null) {
+
+
+
                     if (ch.getHealthPercent() < .01) {
 
                         amountKilled = amountKilled + 1;
@@ -520,6 +637,7 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
 
                         killStartTime = 0;
                         killEndTime = 0;
+                        safeTile = null;
 
                     } else {
 
@@ -558,15 +676,14 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
 
             case ONSTART:
 
-                if (Skills.getActualLevel(Skills.SKILLS.HITPOINTS) < 1){
+                if (!inGame()){
                     General.sleep(10000);
                 } else {
+
                     General.println("Welcome back " + General.getTRiBotUsername());
 
                     if (!onstartCheck) {
-                        if (args.isEmpty()){
-                            trainingMode = true;
-                        }
+
                         Camera.setRotationMethod(Camera.ROTATION_METHOD.DEFAULT);
                         if (isOnStandardSpellbook() && hasAlchRunes()) {
                             alchDecision = true;
@@ -621,11 +738,11 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
                         strenth1 = General.random(5,10);
                         strenth2 = General.random(15,20);
                         strenth3 = General.random(23,30);
-                        strenth4 = General.random(36,42);
+                        strenth4 = General.random(40,43);
                         attack1 = General.random(5,10);
                         attack2 = General.random(15,20);
                         attack3 = General.random(23,30);
-                        attack4 = General.random(34,40);
+                        attack4 = General.random(40,44);
                         General.sleep(7500, 10000);
                         onstartCheck = true;
 
@@ -688,7 +805,7 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
     }
 
     public enum State {
-
+    TAKING_BREAK,
         EAT,
         ATTACK,
         IDLE,
@@ -728,8 +845,6 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
                     killStartTime = System.currentTimeMillis();
                 }
             }
-
-
         } else {
             if (args.isEmpty()) {
                 General.println(main + "We have completed training mode and have no argument set.");
@@ -803,6 +918,22 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
                     return false;
                 }
             }
+            if (args.equals("Bronze dragon")) {
+                RSItem[] slayerGear = Equipment.find("Anti-dragon shield");
+                if (slayerGear.length > 0) {
+                    return true;
+                } else {
+                    return false;
+                }
+            }
+            if (args.equals("Iron dragon")) {
+                RSItem[] slayerGear = Equipment.find("Anti-dragon shield");
+                if (slayerGear.length > 0) {
+                    return true;
+                } else {
+                    return false;
+                }
+            }
         }
 
         return true;
@@ -813,7 +944,7 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
         int strengthLevel = Skills.getActualLevel(Skills.SKILLS.STRENGTH);
         int defenseLevel = Skills.getActualLevel(Skills.SKILLS.DEFENCE);
 
-        if (attackLevel >= 40 && strengthLevel >= 40 && defenseLevel >= 40){
+        if (attackLevel >= attack4 && strengthLevel >= strenth4 && defenseLevel >= 40){
             trainingMode = false;
         } else {
             trainingMode = true;
@@ -824,6 +955,13 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
                 return areaSeagulls.contains(Player.getPosition());
             } else {
                 return areaFallyCows.contains(Player.getPosition());
+            }
+        } else {
+            if (args.equals("Bronze dragon")){
+                return Slayer.BRONZE_DRAGONS.monsterLocation.contains(Player.getPosition());
+            }
+            if (args.equals("Iron dragon")){
+                return Slayer.IRON_DRAGON.monsterLocation.contains(Player.getPosition());
             }
         }
 
@@ -845,61 +983,63 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
     private State getState() {
 
         if (onstartCheck) {
-            if (hasTaskSupplies()) {
-                if (!needsToClaim) {
-                    if (isInArea()) {
-                        if (isUsingCannon) {
-                            if (isCannonSetUp()) {
-                                //if cannon is set up then load cannon
-                                if (isFighting()) {
+            if (!needsToBreak) {
+                if (hasTaskSupplies()) {
+                    if (!needsToClaim) {
+                        if (isInArea()) {
+                            if (isUsingCannon) {
+                                if (isCannonSetUp()) {
+                                    //if cannon is set up then load cannon
+                                    if (isFighting()) {
+                                        return State.CURRENTLY_FIGHTING;
+                                    } else {
+                                        return State.ATTACK;
+                                        //decide wether to afk, pick new monster, or loot
+                                    }
+                                } else {
+                                    if (hasCannonParts()) {
+                                        return State.PLACE_CANNON;
+                                    }
+                                }
+                            } else {
+                                //attack monsters
+                                if (isFighting() || isUnderAttackByTarget()) {
                                     return State.CURRENTLY_FIGHTING;
                                 } else {
                                     return State.ATTACK;
-                                    //decide wether to afk, pick new monster, or loot
-                                }
-                            } else {
-                                if (hasCannonParts()) {
-                                    return State.PLACE_CANNON;
                                 }
                             }
                         } else {
-                            //attack monsters
-                            if (isFighting()) {
-                                return State.CURRENTLY_FIGHTING;
-                            } else {
-                                return State.ATTACK;
-                            }
+
+                            return State.WALK_TO_NPC;
                         }
                     } else {
-                        if (isUnderAtackByTarget()){
-                            return State.CURRENTLY_FIGHTING;
-                        }
-                        return State.WALK_TO_NPC;
+                        return State.CLAIM;
                     }
                 } else {
-                    return State.CLAIM;
+                    return State.FETCH_SUPPLIES;
                 }
-            } else {
-                return State.FETCH_SUPPLIES;
-            }
-            if (shouldCheckTask && isUsingCannon && isCannonSetUp()) {
-                return State.PICKUP_CANNON;
-            }
-            return State.IDLE;
+                if (shouldCheckTask && isUsingCannon && isCannonSetUp()) {
+                    return State.PICKUP_CANNON;
+                }
+                return State.IDLE;
 
+            } else {
+                return State.TAKING_BREAK;
+            }
         } else {
             return State.ONSTART;
         }
     }
 
-    private boolean isUnderAtackByTarget(){
+    private boolean isUnderAttackByTarget(){
         if (trainingMode){
             RSNPC[] attackingme = NPCs.find("Cow");
-            return Combat.isUnderAttack() && attackingme.length > 0 && attackingme[0].isInteractingWithMe();
+            return  attackingme.length > 0 && attackingme[0].isInteractingWithMe() && Player.getRSPlayer().getInteractingCharacter()!=attackingme[0];
 
         } else {
             RSNPC[] attackingme = NPCs.find(args);
-            return Combat.isUnderAttack() && attackingme.length > 0 && attackingme[0].isInteractingWithMe();
+            return attackingme.length > 0 && attackingme[0].isInteractingWithMe();
         }
     }
 
@@ -1588,18 +1728,7 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
      * @return true if in combat with npc, false otherwise.
      */
 
-    public static void finishNPC(final RSNPC npc){
-        if (npc == null)
-            return;
-       if (!npc.isOnScreen())
-           return;
-       if (!npc.isInCombat() && npc.isValid() && Movement.canReach(npc) && npc.getInteractingCharacter() == Player.getRSPlayer()){
-           if (doAttack(npc)){
-               General.println("Target is attacking me and I'm not attacking them... attempting to finish target.");
-               General.sleep(4000,7000);
-           }
-       }
-    }
+
     public static void attackNPC(final RSNPC npc) {
 
         if (npc == null)
@@ -1693,88 +1822,310 @@ public class main extends Script implements Arguments,MessageListening07,Paintin
         }
     }
 
+    /*
+
+                        strenth1 = General.random(5,10);
+                        strenth2 = General.random(15,20);
+                        strenth3 = General.random(23,30);
+                        strenth4 = General.random(36,42);
+                        attack1 = General.random(5,10);
+                        attack2 = General.random(15,20);
+                        attack3 = General.random(23,30);
+                        attack4 = General.random(34,40);
+     */
+
     private void checkStats(){
-        if (Skills.getActualLevel(Skills.SKILLS.STRENGTH) < 10) {
+        if (Skills.getActualLevel(Skills.SKILLS.STRENGTH) < strenth1) {
             if (Combat.getSelectedStyleIndex() != 1) {
                 General.println("Setting attack Style to Strength");
                 Combat.selectIndex(1);
             }
         }
-        //if strenth  is less than 15-20 and more than 10 and attack is less than 10
-        if (Skills.getActualLevel(Skills.SKILLS.STRENGTH) >= 10  && Skills.getActualLevel(Skills.SKILLS.ATTACK) < 10) {
+        if (Skills.getActualLevel(Skills.SKILLS.STRENGTH) >= strenth1  && Skills.getActualLevel(Skills.SKILLS.ATTACK) < attack1) {
             if (Combat.getSelectedStyleIndex() != 0) {
                 General.println("Setting attack Style to Attack");
                 Combat.selectIndex(0);
             }
+        }
+
+        if (Skills.getActualLevel(Skills.SKILLS.ATTACK) >= attack1  && Skills.getActualLevel(Skills.SKILLS.STRENGTH) < strenth2) {
+            if (Combat.getSelectedStyleIndex() != 1) {
+                General.println("Setting attack Style to Strength");
+                Combat.selectIndex(1);
+            }
+        }
+        if (Skills.getActualLevel(Skills.SKILLS.STRENGTH) >= strenth2  && Skills.getActualLevel(Skills.SKILLS.ATTACK) < attack2) {
+            if (Combat.getSelectedStyleIndex() != 0) {
+                General.println("Setting attack Style to attack");
+                Combat.selectIndex(0);
+            }
+        }
+        if (Skills.getActualLevel(Skills.SKILLS.ATTACK) >= attack2  && Skills.getActualLevel(Skills.SKILLS.DEFENCE) < 20) {
+            if (Combat.getSelectedStyleIndex() != 3) {
+                General.println("Setting attack Style to defensive");
+                Combat.selectIndex(3);
+            }
+        }
+        if (Skills.getActualLevel(Skills.SKILLS.DEFENCE) >= 20){
+            if (Skills.getActualLevel(Skills.SKILLS.ATTACK) >= attack2  && Skills.getActualLevel(Skills.SKILLS.STRENGTH) < strenth3) {
+                if (Combat.getSelectedStyleIndex() != 1) {
+                    General.println("Setting attack Style to Strength");
+                    Combat.selectIndex(1);
+                }
+            }
+            if (Skills.getActualLevel(Skills.SKILLS.STRENGTH) >= strenth3  && Skills.getActualLevel(Skills.SKILLS.ATTACK) < attack3) {
+                if (Combat.getSelectedStyleIndex() != 0) {
+                    General.println("Setting attack Style to attack");
+                    Combat.selectIndex(0);
+                }
+            }
+            if (Skills.getActualLevel(Skills.SKILLS.ATTACK) >= attack3  && Skills.getActualLevel(Skills.SKILLS.STRENGTH) < strenth4) {
+                if (Combat.getSelectedStyleIndex() != 1) {
+                    General.println("Setting attack Style to strength");
+                    Combat.selectIndex(1);
+                }
+            }
+            if (Skills.getActualLevel(Skills.SKILLS.STRENGTH) >= strenth4  && Skills.getActualLevel(Skills.SKILLS.ATTACK) < attack4) {
+                if (Combat.getSelectedStyleIndex() != 0) {
+                    General.println("Setting attack Style to attack");
+                    Combat.selectIndex(0);
+                }
+            }
+            if (Skills.getActualLevel(Skills.SKILLS.ATTACK) >= attack4 && Skills.getActualLevel(Skills.SKILLS.STRENGTH) >= strenth4 && Skills.getActualLevel(Skills.SKILLS.DEFENCE) < 40){
+                if (Combat.getSelectedStyleIndex() != 3) {
+                    General.println("Setting attack Style to defense");
+                    Combat.selectIndex(3);
+                }
+            }
+
 
         }
 
-        //if (Skills.getActualLevel(Skills.SKILLS.ATTACK) >= 10 && Skills.getActualLevel(Skills.SKILLS.STRENGTH) >= 10 && Skills.getActualLevel(Skills.SKILLS.DEFENCE) >= 10){
-        //    continueRunning = false;
-       // }
 
-
-
-                //if strength is less than 30 and greater than 20 and attack is less than 20 then
-                if (Skills.getActualLevel(Skills.SKILLS.STRENGTH) < strenth3 && Skills.getActualLevel(Skills.SKILLS.STRENGTH) > strenth2 && Skills.getActualLevel(Skills.SKILLS.ATTACK) < attack2) {
-                    if (Combat.getSelectedStyleIndex() != 0) {
-                        General.println("Setting attack Style to Attack");
-                        Combat.selectIndex(0);
-                    }
-
-                }
-
-                // attack is less than 30 and attack is greater than 20 and strength is less than 30
-                if (Skills.getActualLevel(Skills.SKILLS.ATTACK) < attack3 && Skills.getActualLevel(Skills.SKILLS.ATTACK) > attack2 && Skills.getActualLevel(Skills.SKILLS.STRENGTH) < strenth3) {
-                    if (Skills.getActualLevel(Skills.SKILLS.STRENGTH) >= 20 && Skills.getActualLevel(Skills.SKILLS.ATTACK) >= 20 && Skills.getActualLevel(Skills.SKILLS.DEFENCE) <= 10){
-                        if (Combat.getSelectedStyleIndex() != 3) {
-                            General.println("Setting attack Style to Defence");
-                            Combat.selectIndex(3);
-                        }
-                    } else {
-                        if (Combat.getSelectedStyleIndex() != 1) {
-                            General.println("Setting attack Style to Strength");
-                            Combat.selectIndex(1);
-                        }
-                    }
-
-
-                }
-
-                // adsadadasdasdsadattack is less than 30 and attack is greater than 20 and strength is less than 30
-                if (Skills.getActualLevel(Skills.SKILLS.STRENGTH) < strenth4 && Skills.getActualLevel(Skills.SKILLS.STRENGTH) > strenth3 && Skills.getActualLevel(Skills.SKILLS.ATTACK) < attack3) {
-                    if (Combat.getSelectedStyleIndex() != 0) {
-                        General.println("Setting attack Style to Attack");
-                        Combat.selectIndex(0);
-                    }
-                }
-                //dadsddasdasdasada attack is less than 30 and attack is greater than 20 and strength is less than 30
-                if (Skills.getActualLevel(Skills.SKILLS.ATTACK) >= attack4 && Skills.getActualLevel(Skills.SKILLS.STRENGTH) < strenth4) {
-                    if (Combat.getSelectedStyleIndex() != 1) {
-                        General.println("Setting attack Style to Strength");
-                        Combat.selectIndex(1);
-                    }
-                }
-                if (Skills.getActualLevel(Skills.SKILLS.STRENGTH) >= strenth4 && Skills.getActualLevel(Skills.SKILLS.ATTACK) < attack4) {
-                    if (Combat.getSelectedStyleIndex() != 0) {
-                        General.println("Setting attack Style to Attack");
-                        Combat.selectIndex(0);
-                    }
-                }
-
-                if (Skills.getActualLevel(Skills.SKILLS.STRENGTH) >= strenth4 && Skills.getActualLevel(Skills.SKILLS.ATTACK) >= attack4) {
-                    if (Combat.getSelectedStyleIndex() != 3) {
-                        General.println("Setting attack Style to Defence");
-                        Combat.selectIndex(3);
-                    }
-                }
-
-
-
-        if (Skills.getActualLevel(Skills.SKILLS.DEFENCE) == General.random(30, 40)) {
+        if (Skills.getActualLevel(Skills.SKILLS.DEFENCE) >= 40) {
             continueRunning = false;
         }
     }
+
+    @Override
+    public void onBreakStart(long break_time) {
+        General.println("Preparing for break");
+        if (Combat.isUnderAttack()){
+            General.sleep(30000,50000);
+        }
+        needsToBreak = true;
+
+
+    }
+    @Override
+    public void onBreakEnd() {
+        General.println("Returning from break");
+        needsToBreak = false;
+
+    }
+
+    public enum Slayer {
+
+        KALPHITES("Kalphite worker","", true, new RSArea(new RSTile(3318, 9508, 0), new RSTile(3331, 9496, 0))),
+        HOBGOBLIN("Hobgoblin","", true, new RSArea(new RSTile[] {
+                new RSTile(2904, 3295, 0), new RSTile(2911, 3277, 0),
+                new RSTile(2914, 3279, 0), new RSTile(2908, 3299, 0)})),
+        GHOUL("Ghoul","", true, new RSArea(new RSTile(3438, 3457, 0), new RSTile(3424, 3470, 0))),
+        HILLGIANT("Hillgiant", "", true, new RSArea(
+                new RSTile[] {
+                        new RSTile(3111, 9848, 0),
+                        new RSTile(3121, 9851, 0),
+                        new RSTile(3123, 9829, 0),
+                        new RSTile(3103, 9825, 0),
+                        new RSTile(3098, 9833, 0)
+                }
+        )),
+        SHADES("Shade", "", false, new RSArea(new RSTile(2355, 5217, 0), new RSTile(2366, 5208, 0))),
+        EARTH_WARRIORS("Earth warrior", "", false, new RSArea(new RSTile(3116, 9996, 0), new RSTile(3125, 9972, 0))),
+        //VAMPYRE("Feral Vampyre", "", false, ),
+        ANKOU("Ankou", "", true, new RSArea(
+                new RSTile[] {
+                        new RSTile(2472, 9808, 0),
+                        new RSTile(2477, 9810, 0),
+                        new RSTile(2480, 9801, 0),
+                        new RSTile(2483, 9804, 0),
+                        new RSTile(2486, 9798, 0),
+                        new RSTile(2470, 9794, 0),
+                        new RSTile(2467, 9802, 0)
+                }
+        )),
+        MOSS_GIANT("Moss giant", "", true, new RSArea(new RSTile(3155, 9907, 0), new RSTile(3162, 9899, 0))),
+        OGRES("Ogres", "", true, new RSArea(new RSTile(2500, 3120, 0), new RSTile(2511, 3106, 0))),
+        //OTHERWORDLY_BEINGS("Otherwordly being", "", false, ),
+        ICE_WARRIORS("Ice warrior", "", false, new RSArea(new RSTile(3042, 9589, 0), new RSTile(3066, 9571, 0))),
+        CROCODILE("Crocodile", "Waterskin", true, new RSArea(new RSTile(3347, 2922, 0), new RSTile(3364, 2913, 0))),
+        ICE_GIANTS("Ice giant", "", false, new RSArea(new RSTile(3042, 9589, 0), new RSTile(3066, 9571, 0))),
+        GREEN_DRAGON("Green dragon", "Anti-dragon shield", false, new RSArea(new RSTile(3157, 3694, 0), new RSTile(3128, 3713, 0))),
+        LESSER_DEMON("Lesser demon", "" , true, new RSArea(new RSTile(1707, 10070, 0), new RSTile(1725, 10062, 0))),
+        TROLLS("Troll", "", true, new RSArea(new RSTile(2862, 3590, 0), new RSTile(2876, 3582, 0))),
+        WEREWOLF("Werewolf", "", true, new RSArea(new RSTile(3486, 3495, 0), new RSTile(3503, 3481, 0))),
+        //BLUE_DRAGONS("Blue dragon", "Anti-dragon shield", true, ),
+        FIRE_GIANTS("Fire giant", "", true,  new RSArea(
+                new RSTile[] {
+                        new RSTile(2390, 9787, 0),
+                        new RSTile(2405, 9787, 0),
+                        new RSTile(2404, 9777, 0),
+                        new RSTile(2391, 9777, 0)
+                }
+        )),
+        //JUNGLE_HORRORS("Jungle horrors", "", false, ),
+        //ELVES("Elves", "", false, ),
+        BRONZE_DRAGONS("Bronze dragon", "Anti-dragon shield", false, new RSArea(
+                new RSTile[] {
+                        new RSTile(1644, 10098, 0),
+                        new RSTile(1655, 10102, 0),
+                        new RSTile(1655, 10092, 0),
+                        new RSTile(1644, 10091, 0)
+                }
+        )),
+
+        IRON_DRAGON("Iron dragon", "Anti-dragon shield", false, new RSArea(
+                new RSTile[] {
+                        new RSTile(1657, 10089, 0),
+                        new RSTile(1653, 10080, 0),
+                        new RSTile(1673, 10081, 0),
+                        new RSTile(1667, 10086, 0),
+                        new RSTile(1667, 10094, 0),
+                        new RSTile(1661, 10093, 0)
+                }
+        )),
+        //DAGANNOTHS(""),
+        HELLHOUNDS("Hellhound", "", true, new RSArea(
+                new RSTile[] {
+                        new RSTile(2422, 9784, 0),
+                        new RSTile(2430, 9789, 0),
+                        new RSTile(2438, 9783, 0),
+                        new RSTile(2425, 9780, 0)
+                }
+        )),
+        BLACK_DEMONS("Black demon", "", false, new RSArea(new RSTile(1716, 10093, 0), new RSTile(1726, 10077, 0))),
+        TUROTH("Turoth", "", false, new RSArea(
+                new RSTile[] {
+                        new RSTile(2713, 10014, 0),
+                        new RSTile(2720, 9988, 0),
+                        new RSTile(2733, 9992, 0),
+                        new RSTile(2734, 9998, 0),
+                        new RSTile(2733, 10006, 0),
+                        new RSTile(2727, 10017, 0),
+                        new RSTile(2720, 10017, 0)
+                }
+        )),
+        WYRMS("Wyrm", "Boots of stone", false, new RSArea(
+                new RSTile[] {
+                        new RSTile(1285, 10193, 0),
+                        new RSTile(1271, 10194, 0),
+                        new RSTile(1266, 10203, 0),
+                        new RSTile(1260, 10201, 0),
+                        new RSTile(1256, 10185, 0),
+                        new RSTile(1263, 10186, 0),
+                        new RSTile(1262, 10179, 0),
+                        new RSTile(1280, 10179, 0),
+                        new RSTile(1280, 10183, 0),
+                        new RSTile(1286, 10183, 0)
+                }
+        )),
+        KURASK("Kurask", "leaf-bladed battleaxe", false, new RSArea(new RSTile(2691, 10006, 0), new RSTile(2709, 9988, 0))),
+
+
+        /*
+        CRAWLING_HANDS(),
+
+        CAVE_BUGS(),
+        CAVE_CRAWLERS(),
+        BANSHEES(),
+        CAVE_SLIME(),
+        ROCK_SLUGS(),
+        LIZARDS(),
+        COCKATRICE(),
+        PYREFIENDS(),
+        HARPIE_BUG_SWARM(),
+        WALL_BEAST(),
+        KILLERWATTS(),
+        MOLANISK(),
+        BASILIKS(),
+        TERROR_DOGS(),
+        INFERNAL_MAGES(),
+        */
+        BLOODVELDS("Bloodveld", "", true, new RSArea(new RSTile(2463, 9836, 0), new RSTile(2476, 9826, 0))),
+        //JELLIES(),
+
+        ABERRANT_SPECTRES("Aberrant spectres", "", true,  new RSArea(
+                new RSTile[] {
+                        new RSTile(2390, 9787, 0),
+                        new RSTile(2405, 9787, 0),
+                        new RSTile(2404, 9777, 0),
+                        new RSTile(2391, 9777, 0)
+                }
+        )),
+        //SPIRTUAL_CREATURES(),
+        //DUST_DEVILS(),
+        //DRAKES(),
+        //GARGOYLES(),
+        NECHRYAEL("Nechryael", "", false, new RSArea(
+                new RSTile[] {
+                        new RSTile(1705, 10085, 0),
+                        new RSTile(1703, 10079, 0),
+                        new RSTile(1709, 10077, 0),
+                        new RSTile(1713, 10082, 0),
+                        new RSTile(1708, 10087, 0)
+                }
+        )),
+        ABYSSAL_DEMON("Abyssal demon", "", false, new RSArea(
+                new RSTile[] {
+                        new RSTile(1671, 10100, 0),
+                        new RSTile(1680, 10100, 0),
+                        new RSTile(1678, 10094, 0),
+                        new RSTile(1670, 10094, 0)
+                }
+        ));
+
+
+
+        final String monsterName;
+        final String extraGearName;
+        final boolean canCannon;
+        final RSArea monsterLocation;
+
+        static final Slayer[] CraftingItem = {KALPHITES};
+
+        Slayer(String monsterName, String extraGearName, boolean canCannon, RSArea monsterLocation) {
+            this.monsterName = monsterName;
+            this.extraGearName = extraGearName;
+            this.canCannon = canCannon;
+            this.monsterLocation = monsterLocation;
+        }
+
+        //Name
+        //Is cannonable
+        //Extra required gear
+        //location
+        private String getMonsterName() {
+            return monsterName;
+        }
+        private String getExtraGearName() {
+            return extraGearName;
+        }
+        private boolean canCannon() {
+            return canCannon;
+        }
+        private RSArea getRequiredName() {
+            return monsterLocation;
+        }
+
+
+
+    }
+
+    private void useGE(int itemID){
+
+    }
+
+
 
 
 
