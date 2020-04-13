@@ -1,0 +1,763 @@
+package scripts.aFruitStall;
+
+import org.tribot.api.Clicking;
+import org.tribot.api.DynamicClicking;
+import org.tribot.api.General;
+import org.tribot.api.Timing;
+import org.tribot.api.input.Mouse;
+
+import org.tribot.api.util.abc.ABCUtil;
+import org.tribot.api2007.*;
+import org.tribot.api2007.ext.Filters;
+import org.tribot.api2007.types.*;
+import org.tribot.script.Script;
+import org.tribot.script.ScriptManifest;
+import org.tribot.script.interfaces.Arguments;
+import org.tribot.script.interfaces.Painting;
+
+import scripts.dax_api.api_lib.DaxWalker;
+import scripts.dax_api.api_lib.models.DaxCredentials;
+import scripts.dax_api.api_lib.models.DaxCredentialsProvider;
+
+
+import java.awt.*;
+import java.text.NumberFormat;
+import java.util.HashMap;
+
+
+@ScriptManifest(authors = {"adamhackz"}, category = "aCustom", name = "Fruit", description = "stalls", version = (1))
+
+
+public class Main extends Script implements Arguments, Painting {
+
+
+    private State scriptState;
+
+    // this is an instanced class you can use throughout the whole script.
+    private ABCUtil abcInstance = new ABCUtil();
+
+    private boolean continueRunning = true;
+    private boolean hasBankedOnStart = true;
+    private boolean needsToQuest = false;
+    private boolean clickFatigueBreak = false;
+    private boolean takingNormalBreak = false;
+    boolean needsToDrop = false;
+    private boolean needsToBank = false;
+    private boolean clientCompleted = true;
+
+
+    private boolean foundTile = false;
+    String args;
+
+    int clickCounter = 0;
+    int maxClicks = General.random(5,80);
+    int itemPrice = 0;
+    final int REQUIRED_FRUITSTALL_LEVEL = 25;
+    int eatAt = abcInstance.generateEatAtHP();
+    public final int EATING_ANIMATION = 829;
+    private final int[] shitSeeds = {5307, 5308, 5306, 5309, 5310, 5096, 5098, 5097, 5099, 5101, 5102, 5104, 5103, 5106, 5291, 5292, 5293, 5294, 5282, 5281, 5280, 22873, 1935};
+
+    private final RSArea FRUITSTALL_HOUSE = new RSArea(new RSTile(1795, 3609, 0), new RSTile(1801, 3606, 0));
+    private final RSTile BAKER_TILE = new RSTile(1638, 3685, 0);
+    private final RSTile HOUSE_WEST_FRUITSTALL = new RSTile(1796, 3608, 0);
+    private final RSTile HOUSE_EAST_FRUITSTALL = new RSTile(1799, 3608, 0);
+    private final RSTile escapeTile = new RSTile(1633, 3693, 0);
+
+    private final RSArea VARROCK_SHEEP_PEN = new RSArea(
+            new RSTile[]{
+                    new RSTile(3268, 3345, 0),
+                    new RSTile(3261, 3345, 0),
+                    new RSTile(3259, 3348, 0),
+                    new RSTile(3251, 3348, 0),
+                    new RSTile(3244, 3338, 0),
+                    new RSTile(3232, 3339, 0),
+                    new RSTile(3228, 3343, 0),
+                    new RSTile(3228, 3348, 0),
+                    new RSTile(3231, 3351, 0),
+                    new RSTile(3231, 3357, 0),
+                    new RSTile(3233, 3359, 0),
+                    new RSTile(3243, 3359, 0),
+                    new RSTile(3245, 3356, 0),
+                    new RSTile(3249, 3357, 0),
+                    new RSTile(3250, 3356, 0),
+                    new RSTile(3252, 3356, 0),
+                    new RSTile(3255, 3359, 0),
+                    new RSTile(3264, 3359, 0),
+                    new RSTile(3271, 3352, 0),
+                    new RSTile(3271, 3347, 0)
+            }
+    );
+    private final RSArea VARROCK_INNER_PEN = new RSArea(
+            new RSTile[]{
+                    new RSTile(3232, 3349, 0),
+                    new RSTile(3256, 3355, 0),
+                    new RSTile(3269, 3349, 0),
+                    new RSTile(3250, 3349, 0),
+                    new RSTile(3239, 3341, 0)
+            }
+    );
+
+    private State getState(){
+        if (hasBankedOnStart){
+            if (has38Thieving()){
+                if (hasFood()){
+                   if (needsToEat()){
+                       return State.EAT;
+                   } else {
+                       if (needstoIdle()){
+                           return State.IDLE;
+                       } else {
+                           return State.STEAL_FROM_NPC;
+                       }
+                   }
+                } else {
+                    return State.RESTOCK;
+                }
+            } else {
+                if (!Player.getRSPlayer().isInCombat()) {
+                    if (Inventory.isFull()) {
+                        return State.DROP_ITEMS;
+                    } else {
+                        return State.STEAL_FROM_STALL;
+                    }
+                } else {
+                    return State.RUN;
+                }
+            }
+        } else {
+            return State.BANKONSTART;
+        }
+    }
+
+
+    public enum State {
+        MANAGE_INVENTORY, DROP_ITEMS, WALK_TO_STALL, STEAL_FROM_STALL, TEST, HOP, RUN, BANKONSTART, QUESTING, CLICK_FATIGUED, HUMANIZED_BREAKING, STEAL_FROM_NPC, EAT, CLIENT_OF_KOURREND, IDLE, RESTOCK
+    }
+
+
+    private void daxStart() {
+        DaxWalker.setCredentials(new DaxCredentialsProvider() {
+            @Override
+            public DaxCredentials getDaxCredentials() {
+                return new DaxCredentials("sub_DPjXXzL5DeSiPf", "PUBLIC-KEY");
+            }
+        });
+        Mouse.setSpeed(General.random(240, 360));
+    }
+
+    private boolean onStart() {
+        if (args.equals("tbow") || args.equals("cake")) {
+            if (Options.setShiftClickDropEnabled(true)) {
+                Timing.waitCondition(() -> Options.isShiftClickDropEnabled(), General.random(1200, 2100));
+
+            }
+            daxStart();
+            return true;
+        }
+        return false;
+
+    }
+
+    @Override
+    public void passArguments(HashMap<String, String> hashMap) {
+        if (hashMap.containsKey("custom_input")) {
+            args = hashMap.get("custom_input");
+        } else if (hashMap.containsKey("autostart")) {
+            args = hashMap.get("autostart");
+        }
+    }
+
+    @Override
+    public void run() {
+        if (onStart()) {
+            while (continueRunning) {
+                loop();
+            }
+        }
+    }
+
+    private final long START_TIME = System.currentTimeMillis();
+
+    @Override
+    public void onPaint(Graphics g) {
+        NumberFormat.getInstance();
+        long runtime = System.currentTimeMillis() - START_TIME;
+        //long idletime =  (System.currentTimeMillis() - LAST_BREAK);
+        g.drawString("Running for: " + Timing.msToString(runtime), 5, 80);
+
+        g.drawString("State: " + scriptState, 5, 120);
+        g.drawString("Clicks " + clickCounter, 5, 140);
+        g.drawString("Max clicks " + maxClicks, 5, 160);
+        g.drawString("eat at " + eatAt, 5, 180);
+        g.drawString("currenthp " + getHpPercent(), 5, 200);
+        g.drawString("do we need  to eat " + needsToEat(), 5, 220);
+        g.drawString("inv full do we need to drop" + Inventory.isFull() +" " + needsToDrop, 5, 240);
+
+       // g.drawString("idle time: " + IDLE_TIMER, 5, 160);
+       // g.drawString("time since last idle: " + Timing.msToString(idletime), 5, 180);
+
+       // g.drawString("last Item price:  " + itemPrice, 5, 220);
+       // if (clickingTile!=null){
+       //     g.drawPolygon(Projection.getTileBoundsPoly(clickingTile, 0));
+       // }
+
+    }
+
+    public void performTimedActions() {
+
+
+
+        if (abcInstance.shouldCheckXP()) {
+            abcInstance.checkXP();
+            General.sleep(General.randomSD(750, 1500, 1000, 150)); // sleep makes sure it checks xp longer.
+        }
+
+        if (abcInstance.shouldExamineEntity())
+            abcInstance.examineEntity();
+
+        if (abcInstance.shouldMoveMouse())
+            abcInstance.moveMouse();
+
+        if (abcInstance.shouldPickupMouse())
+            abcInstance.pickupMouse();
+
+        if (abcInstance.shouldRightClick())
+            abcInstance.rightClick();
+
+        if (abcInstance.shouldRotateCamera())
+            abcInstance.rotateCamera();
+
+
+        if (abcInstance.shouldLeaveGame())
+
+            abcInstance.leaveGame();
+
+    }
+
+    private int loop() {
+        scriptState = getState();
+        General.sleep(50);
+        //performTimedActions();
+        General.println(scriptState);
+
+        if (Camera.getCameraAngle() <= 62) {
+            Camera.setCameraAngle(General.random(63, 100));
+        }
+        switch (scriptState) {
+
+
+            case IDLE:
+                performTimedActions();
+                int random1 = General.randomSD(750, 47000, 14000, 5000);
+                maxClicks = General.randomSD(5,75, 30,9);
+                General.println("Sleeping for " +random1);
+                General.sleep(random1);
+
+                break;
+
+            case RESTOCK:
+                if (isAtBank()) {
+                    if (Banking.isBankScreenOpen()) {
+                        if (hasItemFilter("seed")) {
+                            Banking.depositAll();
+                        } else {
+                            if (bankHasItem("Jug of wine")) {
+                                if (!hasItem("Jug of wine")) {
+                                    Banking.withdraw(General.random(6, 14), "Jug of wine");
+                                    General.sleep(2000, 3000);
+                                }
+
+                            } else {
+                                General.println("No jugs of wine in bank");
+                                continueRunning = false;
+                            }
+                        }
+                    } else {
+                        if (Banking.openBank()) {
+                            Timing.waitCondition(() -> Banking.isBankScreenOpen(), General.random(2500, 4100));
+                        }
+                    }
+                } else {
+                    if (DaxWalker.walkToBank()) {
+                        Timing.waitCondition(() -> !Player.isMoving(), General.random(2500, 4100));
+                    }
+                }
+
+
+                break;
+
+
+            case DROP_ITEMS:
+
+                ShiftDrop.shiftDropAll();
+                break;
+
+            case STEAL_FROM_STALL:
+                Escape();
+                if (args.equals("tbow")) {
+
+                    //Checks for the correct argument
+                    if (hasFruitStallLevel()) {
+                        //Checks if we have the required theiving level
+                        if (!FRUITSTALL_HOUSE.contains(Player.getPosition())) {
+                            //Checks if we are in the fruit stall house
+                            //if we are not, we use daxwalker to walk to a random fruit stall in the house
+                            int random = General.random(1, 2);
+                            if (random == 1) {
+                                if (DaxWalker.walkTo(HOUSE_WEST_FRUITSTALL)) {
+                                    Timing.waitCondition(() -> !Player.isMoving(), General.random(1200, 2100));
+                                }
+                            } else{
+                                if (DaxWalker.walkTo(HOUSE_EAST_FRUITSTALL)) {
+                                    Timing.waitCondition(() -> !Player.isMoving(), General.random(1200, 2100));
+                                }
+                            }
+                        } else {
+                            //if we have the required level
+                            //and we are in the fruitstall house
+                            //check if there is a player within 2 tiles of us with freeWorld()
+                            if (freeWorld()) {
+                                RSObject[] stall = Objects.findNearest(10, "Fruit Stall");
+                                if (stall.length > 0 && stall[0] != null) {
+                                    if (stall[0].isClickable() && stall[0].isOnScreen()) {
+                                        //now we check if the stall exists, is clickable, and is on your screen
+                                        if (!foundTile) {
+                                            if (!Player.isMoving()) {
+                                                if (DynamicClicking.clickRSObject(stall[0], "Steal-from")) {
+                                                    General.sleep(5000, 8000);
+                                                    if (Player.getPosition().distanceTo(HOUSE_EAST_FRUITSTALL) <= 2) {
+                                                        foundTile = true;
+                                                    }
+                                                    if (Player.getPosition().distanceTo(HOUSE_WEST_FRUITSTALL) <= 2) {
+                                                        foundTile = true;
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            RSObject[] stall1 = Objects.findNearest(2, "Fruit Stall");
+                                            //We do a second stall check now that we have set our tile to look for our closest tile
+                                            if (stall1.length > 0 && stall1[0] != null) {
+                                                if (stall1[0].isClickable() && stall1[0].isOnScreen()) {
+                                                    // Here we check the game uptext
+                                                    //and force a click if something got stuck
+                                                    if (Game.isUptext("->")) {
+                                                        Clicking.hover(stall1);
+                                                        General.sleep(150, 200);
+                                                        Mouse.click(1);
+                                                        General.sleep(150, 200);
+                                                    } else {
+                                                        if (DynamicClicking.clickRSObject(stall1[0], "Steal-from")) {
+                                                            General.sleep(2100, 2400);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        //Emergency failsafe to adjust the camera if we somehow get stuck unable to see the stall
+                                        stall[0].adjustCameraTo();
+                                        General.sleep(1300,2000);
+                                    }
+                                }
+                            } else {
+                                hopWorlds();
+                            }
+                        }
+                    } else {
+
+                        //if we don't have 25 thieving
+                        if (hasBakeryStallLevel()) {
+                            //check if we have atleast 5 theiving
+                            if (Player.getPosition().equals(BAKER_TILE)) {
+                                equipBookFailsafe();
+                                RSObject[] stall = Objects.findNearest(10, "Baker's stall");
+                                if (stall.length > 0 && stall[0] != null) {
+                                    if (freeWorld()) {
+                                        if (stall[0].isClickable() && stall[0].isOnScreen()) {
+                                            //We check if the stall exists
+                                            //if the spot is already taken
+                                            //and if the stall is clickable and onscreen
+                                            RSNPC[] guard = NPCs.findNearest("Kourend guard");
+                                            if (guard.length > 0 && guard[0] != null && Player.getPosition().distanceTo(guard[0].getPosition()) >= 3) {
+                                                //we check if guards are exist and are atleast 3 tiles away so they wont attack us
+                                                if (Game.isUptext("->")) {
+                                                    Clicking.hover(stall[0]);
+                                                    shortSleep();
+                                                    Mouse.click(1);
+                                                    shortSleep();
+                                                } else {
+                                                    if (DynamicClicking.clickRSObject(stall[0], "Steal-from")) {
+                                                        General.sleep(2100, 2400);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        hopWorlds();
+                                    }
+                                }
+
+
+                            } else {
+                                if (BAKER_TILE.isOnScreen() && BAKER_TILE.isOnScreen()){
+                                    if (BAKER_TILE.isOnScreen() && BAKER_TILE.isOnScreen() && !Player.isMoving()) {
+                                        Walking.clickTileMS(BAKER_TILE.getPosition(), "Walk here");
+                                        General.sleep(5000, 9000);
+                                    }
+                                } else {
+                                    if (DaxWalker.walkTo(BAKER_TILE)) {
+                                        Timing.waitCondition(() -> !Player.isMoving(), General.random(1200, 2100));
+                                    }
+                                }
+                            }
+
+                        }
+
+                    }
+
+                }
+                if (args.equals("cake")) {
+                    if (Player.getPosition().equals(BAKER_TILE)) {
+                     equipBookFailsafe();
+                        RSObject[] stall = Objects.findNearest(10, "Baker's stall");
+                        if (stall.length > 0 && stall[0] != null) {
+                            if (freeWorld()) {
+                                if (stall[0].isClickable() && stall[0].isOnScreen()) {
+                                    //We check if the stall exists
+                                    //if the spot is already taken
+                                    //and if the stall is clickable and onscreen
+                                    RSNPC[] guard = NPCs.findNearest("Kourend guard");
+                                    if (guard.length > 0 && guard[0] != null && Player.getPosition().distanceTo(guard[0].getPosition()) >= 3) {
+                                        //we check if guards are exist and are atleast 3 tiles away so they wont attack us
+                                        if (Game.isUptext("->")) {
+                                            Clicking.hover(stall[0]);
+                                            shortSleep();
+                                            Mouse.click(1);
+                                            shortSleep();
+                                        } else {
+                                            if (DynamicClicking.clickRSObject(stall[0], "Steal-from")) {
+                                                General.sleep(2100, 2400);
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                hopWorlds();
+                            }
+                        }
+                    } else {
+                        if (BAKER_TILE.isOnScreen() && BAKER_TILE.isOnScreen()){
+                            if (BAKER_TILE.isOnScreen() && BAKER_TILE.isOnScreen() && !Player.isMoving()) {
+                                Walking.clickTileMS(BAKER_TILE.getPosition(), "Walk here");
+                                General.sleep(5000, 9000);
+                            }
+                        } else {
+                            if (DaxWalker.walkTo(BAKER_TILE)) {
+                                Timing.waitCondition(() -> !Player.isMoving(), General.random(1200, 2100));
+                            }
+                        }
+                    }
+                }
+
+
+                break;
+
+            case MANAGE_INVENTORY:
+                if (needsToDrop) {
+                    if (shitSeeds.length > 0) {
+                        ShiftDrop.shiftDrop(shitSeeds);
+                        General.sleep(700,1200);
+                        needsToDrop = false;
+                    } else {
+                        needsToDrop = false;
+                    }
+                }
+
+
+                break;
+
+            case EAT:
+
+                if (getHpPercent() <= eatAt) {
+                    eatFood();
+                    sleep(300, 500);
+                    for (int i = 0; i < 10 && Player.getAnimation() == EATING_ANIMATION; i++) {
+                        sleep(90, 110);
+                    }
+                    eatAt = abcInstance.generateEatAtHP();
+                    /*
+                    int decision = General.random(1, 1);
+                    if (decision == 1) {
+                        eatAt = abcInstance.generateEatAtHP();
+                    } else {
+
+                       eatAt = 3;
+                    }
+                   */
+                }
+                break;
+
+            case RUN:
+                Escape();
+                break;
+
+
+            case STEAL_FROM_NPC:
+                if (VARROCK_SHEEP_PEN.contains(Player.getPosition())) {
+                    if (Inventory.isFull()) {
+                        needsToDrop = true;
+                    } else {
+                        RSNPC target = findNextTarget("Master farmer");
+                        if (target != null) {
+                            navigateAndSteal(target);
+                        } else {
+                            if (DaxWalker.walkTo(VARROCK_INNER_PEN.getRandomTile())) {
+                                Timing.waitCondition(() -> !Player.isMoving(), General.random(1200, 2100));
+                            }
+                        }
+
+                    }
+
+                } else {
+                    if (DaxWalker.walkTo(VARROCK_SHEEP_PEN.getRandomTile())) {
+                        Timing.waitCondition(() -> !Player.isMoving(), General.random(1200, 2100));
+                    }
+                }
+
+                break;
+
+
+            case BANKONSTART:
+
+                if (isAtBank()) {
+                    if (Banking.isBankScreenOpen()) {
+                        Banking.depositAll();
+                        General.sleep(1200, 3000);
+                        //Banking.depositEquipment();
+                        //General.sleep(1200, 3000);
+                        hasBankedOnStart = true;
+                    } else {
+
+                        if (Banking.openBank()) {
+                            Timing.waitCondition(() -> Banking.isBankScreenOpen(), General.random(2500, 4100));
+                        }
+
+                    }
+                } else {
+                    if (DaxWalker.walkToBank()) {
+                        Timing.waitCondition(() -> !Player.isMoving(), General.random(2500, 4100));
+                    }
+                }
+
+                break;
+
+        }
+        return 50;
+    }
+
+    private boolean hasFruitStallLevel(){
+        return Skills.getCurrentLevel(Skills.SKILLS.THIEVING) >= 25;
+    }
+
+    private boolean hasBakeryStallLevel(){
+        return Skills.getCurrentLevel(Skills.SKILLS.THIEVING) >= 5;
+    }
+
+    private void equipBookFailsafe(){
+        RSItem[] book = Inventory.find("Kharedst's memoirs");
+        if (book.length > 0 && book[0] != null) {
+            Clicking.click("Wield", book[0]);
+            General.sleep(2100, 2400);
+
+        }
+    }
+
+    public void eatFood() {
+        if (GameTab.getOpen() != GameTab.TABS.INVENTORY) {
+            GameTab.open(GameTab.TABS.INVENTORY);
+        }
+        RSItem[] food = Inventory.find(Filters.Items.actionsContains("Drink"));
+        if (food.length > 0) {
+            food[0].click("Drink");
+            General.sleep(500, 1200);
+            General.println("Ate food..");
+        }
+    }
+
+    private boolean isAtBank() {
+        RSObject[] bank = Objects.findNearest(20, "Bank booth", "Bank chest", "Bank Booth", "Open chest");
+        RSNPC[] banker = NPCs.findNearest("Banker");
+        return bank.length > 0 && bank[0] != null || banker.length > 0 && banker[0] != null;
+    }
+
+    private boolean hasItemFilter(String... ItemName) {
+        RSItem[] items = Inventory.find(Filters.Items.nameContains(ItemName));
+        return items.length > 0 && items[0] != null;
+    }
+
+    private boolean bankHasItemFilter(String... ItemName) {
+        RSItem[] items = Banking.find(Filters.Items.nameContains(ItemName));
+        return items.length > 0 && items[0] != null;
+    }
+
+
+    private boolean hasItem(String... ItemName) {
+        RSItem[] items = Inventory.find(ItemName);
+        return items.length > 0 && items[0] != null;
+    }
+
+    private boolean bankHasItem(String... ItemName) {
+        RSItem[] items = Banking.find(ItemName);
+        return items.length > 0 && items[0] != null;
+    }
+
+
+    public boolean freeWorld() {
+        final RSPlayer[] person = Players.getAll((p) -> !p.equals(Player.getRSPlayer()) && Player.getPosition().distanceTo(p) <= 2);
+        if (person.length > 0) {
+            General.println("There is another player");
+            return false;
+        }
+        return true;
+    }
+
+
+    public int getHpPercent() {
+        return (Skills.getCurrentLevel(Skills.SKILLS.HITPOINTS) * 100) / Skills.getActualLevel(Skills.SKILLS.HITPOINTS);
+    }
+
+    private void Escape() {
+
+        if (Player.getRSPlayer().isInCombat()) {
+            if (Player.getPosition().distanceTo(escapeTile) > 3) {
+                if (DaxWalker.walkTo(escapeTile)) {
+                    Timing.waitCondition(() -> !Player.isMoving(), General.random(1200, 2100));
+                }
+            } else {
+                hopWorlds();
+            }
+        }
+    }
+
+    public void navigateAndSteal(final RSNPC npc) {
+
+        if (npc == null)
+            return;
+
+        if (!npc.isOnScreen() || !npc.isClickable())
+            navigateToNPC(npc);
+        //Camera.turnToTile(npc);
+
+        if (npc.isValid() && PathFinding.canReach(npc.getPosition(), false)) {
+            if (npc.getPosition().distanceTo(Player.getPosition()) > 1){
+                if (clickOption(npc)) {
+                    General.sleep(500, 1300);
+                    clickCounter = clickCounter+1;
+                    navigateAndSteal(npc);
+                    return;
+
+                }
+            } else {
+                if (clickOption(npc)) {
+                    General.sleep(230, 750);
+                    clickCounter = clickCounter+1;
+                    navigateAndSteal(npc);
+                    return;
+
+                }
+            }
+
+        }
+    }
+
+    private static boolean clickOption(final RSNPC npc) {
+       // Clickable menuNode = Hovering.getHoveringItem();
+        //if (Hovering.isHovering() && Hovering.getShouldOpenMenu() && menuNode != null)  // if we still had the menu open for this NPC as a 'hover' NPC.
+        //    return Clicking.click(menuNode);
+       // else
+            return Clicking.click("Pickpocket", npc);
+    }
+
+    public RSNPC findNextTarget(String targetName) {
+        if (targetName != null) {
+            RSNPC[] targets = NPCs.find(targetName);
+            RSTile myLocation = new RSTile(Player.getPosition().getX(), Player.getPosition().getY(), Player.getPosition().getPlane());
+            RSNPC[] sortedTargets = NPCs.sortByDistance(Player.getPosition(), targets);
+            if (sortedTargets.length > 0 && sortedTargets[0] != null) {
+                for (int i = 0; i < sortedTargets.length; i++) {
+                    if (sortedTargets[i].isValid() && PathFinding.canReach(sortedTargets[i], false) && sortedTargets[i].getInteractingCharacter() == null  && PathFinding.canReach(sortedTargets[i].getPosition(), false)) {
+                        return sortedTargets[i];
+                    }
+                }
+                // all nearby targets are in combat, try again soon.
+                return null;
+            } else {
+                return null;
+            }
+        } else {
+            return null;
+        }
+    }
+
+    public static void navigateToNPC(final RSNPC npc) {
+        if (!npc.isOnScreen()) {
+            npc.adjustCameraTo();
+            if (Timing.waitCondition(() -> npc.isOnScreen() || npc.isClickable(), General.random(2000, 3000))) {
+
+            } else {
+                PathFinding.aStarWalk(npc.getPosition());
+                Timing.waitCondition(() -> npc.isOnScreen() || npc.isClickable(), General.random(2000, 3000));
+            }
+        }
+
+    }
+
+    private boolean needsToEat() {
+        if (getHpPercent() <= eatAt){
+            return true;
+        }
+        return false;
+    }
+
+    private boolean has38Thieving() {
+        return Skills.getActualLevel(Skills.SKILLS.THIEVING) >= 38;
+    }
+
+    private boolean hasFood() {
+        RSItem[] food = Inventory.find(Filters.Items.actionsEquals("Drink"));
+        return food.length > 0 && food[0] != null;
+    }
+
+    private boolean needstoIdle(){
+        return clickCounter >= maxClicks;
+    }
+
+
+    private void shortSleep(){
+        int randomTime = General.randomSD(45,240,140,50);
+        General.sleep(randomTime);
+    }
+
+
+    private void hopWorlds() {
+        if (!WorldHopper.atSelectWorldScreen()) {
+            General.sleep(2500, 4000);
+            int randomWorld = WorldHopper.getRandomWorld(true, false);
+            WorldHopper.changeWorld(randomWorld);
+            General.sleep(2500, 4000);
+        } else {
+            General.sleep(2500, 4000);
+            int randomWorld = WorldHopper.getRandomWorld(true, false);
+            if (randomWorld != 324 || randomWorld != 318 || randomWorld != 319 || randomWorld != 343 || randomWorld != 345 || randomWorld != 373 || randomWorld != 366 || randomWorld != 364 || randomWorld != 361 || randomWorld != 353 || randomWorld != 349 || randomWorld != 391 || randomWorld != 392 || randomWorld != 396 || randomWorld != 420 || randomWorld != 417 || randomWorld != 416 || randomWorld != 415
+                    || randomWorld != 400 || randomWorld != 402 || randomWorld != 403 || randomWorld != 404 || randomWorld != 405 || randomWorld != 406 || randomWorld != 407 || randomWorld != 408 || randomWorld != 409
+                    || randomWorld != 410 || randomWorld != 411 || randomWorld != 412 || randomWorld != 428 || randomWorld != 429 || randomWorld != 443 || randomWorld != 447 || randomWorld != 448 || randomWorld != 449 || randomWorld != 450
+                    || randomWorld != 462 || randomWorld != 463 || randomWorld != 467) {
+                General.println("Hopping to a non PVP world");
+                General.sleep(2500, 4000);
+                WorldHopper.changeWorld(randomWorld);
+            }
+
+        }
+    }
+
+}
