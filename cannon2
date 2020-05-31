@@ -1,0 +1,804 @@
+package scripts.cannonClicker;
+
+import org.tribot.api.Clicking;
+import org.tribot.api.General;
+import org.tribot.api.Timing;
+import org.tribot.api.input.Keyboard;
+import org.tribot.api.input.Mouse;
+import org.tribot.api.util.abc.ABCUtil;
+import org.tribot.api2007.*;
+import org.tribot.api2007.ext.Filters;
+import org.tribot.api2007.types.*;
+import org.tribot.script.Script;
+import org.tribot.script.ScriptManifest;
+import org.tribot.script.interfaces.*;
+import scripts.api.dax_api.api_lib.DaxWalker;
+import scripts.api.dax_api.api_lib.models.DaxCredentials;
+import scripts.api.dax_api.api_lib.models.DaxCredentialsProvider;
+import scripts.api.dax_api.api_lib.models.RunescapeBank;
+import scripts.api.listener.ProjectileObserver;
+import scripts.api.listener.cannon.CannonObserver;
+import scripts.cannonClicker.Data.Constants;
+import scripts.cannonClicker.Data.Vars;
+
+import java.awt.*;
+import java.awt.event.KeyEvent;
+import java.net.URL;
+import java.text.NumberFormat;
+import java.util.HashMap;
+
+@ScriptManifest(authors = {"adamhackz"}, category = "Adam", name = "aCannonClicker", description = "Testo", version = (0.02))
+
+
+public class main extends Script implements Painting, MessageListening07, Breaking, Arguments, Ending {
+
+
+    String args;
+    private URL fxml;
+    private GUI gui;
+    private Controller controller = new Controller();
+    private State scriptState;
+    private ABCUtil abcInstance = new ABCUtil();
+    private double requiredPrayerLevel = General.random(5, 15);
+
+    private long LAST_LOAD = System.currentTimeMillis();
+    private long LOAD_TIME = General.random(7000, 36000);
+
+
+
+    @Override
+    public void onPaint(Graphics g) {
+        NumberFormat.getInstance();
+        long runtime = System.currentTimeMillis() - Vars.get().START_TIME;
+        long xpGained = Skills.getXP(Skills.SKILLS.RANGED) - Vars.get().startingXP;
+
+        int distance = Player.getPosition().distanceTo(Vars.get().CANNON_TILE);
+        double timeuntiload = System.currentTimeMillis() - LAST_LOAD;
+
+        g.drawString("Running for: " + Timing.msToString(runtime), 5, 80);
+        g.drawString("XP gained: " + (xpGained), 5, 100);
+        g.drawString("State: " + scriptState, 5, 120);
+        g.drawString("Distance from cannon " + distance, 5, 140);
+        g.drawString("Have we placed our cannon " + Vars.get().cannonPlaced, 5, 160);
+        if (Vars.get().USE_PPOTS) {
+            g.drawString("Drinking ppot at " + requiredPrayerLevel, 5, 180);
+        }
+        g.drawString("Reloading " + timeuntiload + " / " + LOAD_TIME, 5, 200);
+        g.drawString("Current args " + args, 5, 220);
+
+        g.drawString("Has required cannon parts " + cannonRequired(), 5, 260);
+        g.drawString("Has food and pots required " + ppotsAndFood(), 5, 280);
+        g.drawString("Has cannonballs" + hasCBRequired(), 5, 300);
+
+
+    }
+
+
+    @Override
+    public void passArguments(HashMap<String, String> hashMap) {
+
+        if (hashMap.containsKey("custom_input")) {
+            args = hashMap.get("custom_input");
+            for (String arg : args.split(",")) {
+                if (arg.isEmpty()) {
+                    if (Vars.get().CANNON_TILE == null) {
+                        Vars.get().CANNON_TILE.equals(Player.getPosition());
+                    }
+                    if (Vars.get().CANNON_AREA == null) {
+                        Vars.get().CANNON_AREA = new RSArea(new RSTile(Vars.get().CANNON_TILE.getX() + 2, Vars.get().CANNON_TILE.getY() - 2), new RSTile(Vars.get().CANNON_TILE.getX() - 2, Vars.get().CANNON_TILE.getY() + 2));
+                    }
+
+
+                } else {
+                    if (arg.contains("here")) {
+                        if (Vars.get().CANNON_TILE == null) {
+                            Vars.get().CANNON_TILE.equals(Player.getPosition());
+                        }
+                        if (Vars.get().CANNON_AREA == null) {
+                            Vars.get().CANNON_AREA = new RSArea(new RSTile(Vars.get().CANNON_TILE.getX() + 2, Vars.get().CANNON_TILE.getY() - 2), new RSTile(Vars.get().CANNON_TILE.getX() - 2, Vars.get().CANNON_TILE.getY() + 2));
+                        }
+
+                    }
+                    if (arg.contains("khazard")) {
+                        if (Vars.get().CANNON_TILE == null) {
+                            Vars.get().CANNON_TILE = Constants.Locations.KHAZARD.getArea().getRandomTile();
+                        }
+                        if (Vars.get().CANNON_AREA == null) {
+                            Vars.get().CANNON_AREA = Constants.Locations.KHAZARD.getArea();
+                        }
+
+                    }
+                    if (arg.contains("ogres")) {
+                        if (Vars.get().CANNON_TILE == null) {
+                            Vars.get().CANNON_TILE = Constants.Locations.CASTLE_WARS.getArea().getRandomTile();
+                        }
+                        if (Vars.get().CANNON_AREA == null) {
+                            Vars.get().CANNON_AREA = Constants.Locations.CASTLE_WARS.getArea();
+                        }
+                    }
+                    if (arg.contains("camp")) {
+                        if (Vars.get().CANNON_TILE == null) {
+                            Vars.get().CANNON_TILE = Constants.Locations.COMBAT_TRAINING_AREA.getArea().getRandomTile();
+                        }
+                        if (Vars.get().CANNON_AREA == null) {
+                            Vars.get().CANNON_AREA = Constants.Locations.COMBAT_TRAINING_AREA.getArea();
+                        }
+                    }
+
+                    if (arg.contains("loot")) {
+                        Vars.get().LOOTING = true;
+                    }
+                    if (arg.contains("prayer")) {
+                        Vars.get().USE_PPOTS = true;
+                    }
+                    if (arg.contains("food:")) {
+                        //set food
+                    }
+                    if (arg.contains("40")) {
+                        Vars.get().ENDING_LEVEL = 40;
+                    }
+                    if (arg.contains("50")) {
+                        Vars.get().ENDING_LEVEL = 50;
+                    }
+                    if (arg.contains("endatge")) {
+                        Vars.get().END_AT_GE = true;
+                    }
+
+
+                }
+            }
+        }
+    }
+
+
+    private boolean onStart() {
+
+        daxStart();
+        return true;
+    }
+
+
+    @Override
+    public void run() {
+
+        /*
+        try {
+            fxml = new URL("https://pastebin.com/raw/Bqhwx23z");
+        } catch (MalformedURLException e) {
+            e.printStackTrace();
+        }
+        gui = new GUI(fxml);
+        gui.show();
+        while (gui.isOpen())
+            sleep(500);
+
+
+         */
+
+        if (onStart()) {
+
+            while (Vars.get().continueRunning) {
+                loop();
+            }
+        }
+    }
+
+
+    private void daxStart() {
+        DaxWalker.setCredentials(new DaxCredentialsProvider() {
+            @Override
+            public DaxCredentials getDaxCredentials() {
+                return new DaxCredentials("sub_DPjXXzL5DeSiPf", "PUBLIC-KEY");
+            }
+        });
+        Mouse.setSpeed(General.random(89, 360));
+    }
+
+    private int loop() {
+
+        scriptState = getState();
+        General.sleep(50);
+
+        switch (scriptState) {
+
+            case ENDING:
+                pick_up_cannon();
+                General.sleep(2000, 3000);
+                walkToGE();
+
+                break;
+
+            case HOPPING_WORLDS:
+                if (Vars.get().CANNON_AREA.contains(Player.getPosition())) {
+                    RSInterface ingame = Interfaces.get(69, 2);
+                    if (Interfaces.isInterfaceSubstantiated(ingame)) {
+                        String text = ingame.getText();
+                        if (text != null && !text.isEmpty()) {
+                            int world = WorldHopper.getRandomWorld(true, false);
+                            if (world != WorldHopper.getWorld()) {
+                                WorldHopper.changeWorld(world);
+                            }
+                        }
+                    } else {
+                        if (WorldHopper.openWorldSelect()) {
+                            Timing.waitCondition(() -> Interfaces.isInterfaceSubstantiated(ingame), General.random(2500, 4100));
+                        }
+                    }
+                }
+
+
+                break;
+
+            case REPAIR_CANNON:
+                if (Vars.get().CANNON_TILE != null) {
+                    RSObject[] brokenCannon = Objects.findNearest(20, Filters.Objects.nameEquals("Broken mutlicannon").and(Filters.Objects.tileEquals(Vars.get().CANNON_TILE)));
+                    if (brokenCannon.length > 0) {
+                        General.println("Needs to repair cannon");
+                        if (Clicking.click("Repair", brokenCannon[0])) {
+                            Timing.waitCondition(() -> brokenCannon.length < 1, General.random(3000, 5000));
+
+                        }
+                    }
+                } else {
+                    General.println("Cannon tile was null");
+                    Vars.get().continueRunning = false;
+                }
+
+                break;
+            case RETURN_TO_CANNON:
+
+                if (Vars.get().CANNON_TILE.isOnScreen() && Vars.get().CANNON_TILE.isClickable()) {
+                    General.println("Screen walking to cannon tile");
+                    if (Walking.clickTileMS(Vars.get().CANNON_TILE, "Walk here")) {
+                        Timing.waitCondition(() -> Player.getPosition().equals(Vars.get().CANNON_TILE) || !Player.isMoving(), General.random(2500, 4100));
+                    }
+                } else {
+                    General.println("Walking to cannon tile");
+                    if (DaxWalker.walkTo(Vars.get().CANNON_AREA.getRandomTile())) {
+                        Timing.waitCondition(() -> !Player.isMoving(), General.random(2500, 4100));
+                    }
+                }
+
+                break;
+
+            case SETUP_CANNON:
+                if (hasCannonFurnace()) {
+                    if (Player.getPosition().equals(Vars.get().CANNON_TILE)) {
+                        setupCannon();
+                    } else {
+                        if (Vars.get().CANNON_TILE.isOnScreen()) {
+                            if (Walking.clickTileMS(Vars.get().CANNON_TILE, "Walk here")) {
+                                General.sleep(1200, 3000);
+                            }
+                        } else {
+                            if (DaxWalker.walkTo(Vars.get().CANNON_AREA.getRandomTile())) {
+                                Timing.waitCondition(() -> !Player.isMoving(), General.random(2500, 4100));
+                            }
+                        }
+                    }
+
+
+                }
+
+                break;
+
+            case RELOAD_CANNON:
+                //Interface check for level up
+                RSInterface iface = NPCChat.getClickContinueInterface();
+                if (Interfaces.isInterfaceSubstantiated(iface)) {
+                    Keyboard.sendPress(KeyEvent.CHAR_UNDEFINED, KeyEvent.VK_SPACE);
+                    Timing.waitCondition(() -> !Interfaces.isInterfaceSubstantiated(iface), General.random(2300, 3100));
+                } else {
+
+                    //Handles using ppots
+                    if (Vars.get().USE_PPOTS) {
+                        if (!Prayer.isPrayerEnabled(Prayer.PRAYERS.PROTECT_FROM_MELEE) && Skills.getCurrentLevel(Skills.SKILLS.PRAYER) > 0) {
+                            if (Prayer.enable(Prayer.PRAYERS.PROTECT_FROM_MELEE)) {
+                                Timing.waitCondition(() -> Prayer.isPrayerEnabled(Prayer.PRAYERS.PROTECT_FROM_MELEE), General.random(2500, 4100));
+                            }
+                        }
+                        if (Skills.getCurrentLevel(Skills.SKILLS.PRAYER) <= requiredPrayerLevel) {
+                            RSItem[] item = Inventory.find(Filters.Items.nameContains("Prayer potion"));
+                            if (item.length > 0 && item[0] != null) {
+                                if (Clicking.click("Drink", item[0])) {
+                                    General.sleep(700, 1300);
+                                    requiredPrayerLevel = General.random(7, 15);
+                                }
+                            }
+                        }
+
+                    }
+
+                    //Cannon reloading
+                    if (Vars.get().cannonPlaced) {
+                        RSObject[] cannon = Objects.findNearest(12, Filters.Objects.nameEquals("Dwarf multicannon").and(Filters.Objects.tileEquals(Vars.get().CANNON_TILE)));
+                        RSItem[] cannonballs = Inventory.find("Cannonball");
+
+                        if (cannon.length > 0) {
+                            General.println("cannon found");
+                            if (cannonballs.length > 0) {
+                                General.println("cannonball found");
+                                if (Player.getPosition().distanceTo(cannon[0]) < 15 && cannon[0].isOnScreen() && cannon[0].isOnScreen()) {
+                                    General.println("Reload in cannon area");
+                                    RSObjectDefinition definitionCheck = cannon[0].getDefinition();
+                                    if (definitionCheck != null) {
+                                        if (cannon[0].getDefinition().getActions()[0].contains("Fire")) {
+                                            General.println("we need to fire cannon");
+                                                if (System.currentTimeMillis() - LAST_LOAD >= LOAD_TIME) {
+                                                    if (Clicking.click("Fire", cannon[0])) {
+                                                        General.sleep(1500, 3000);
+                                                        LAST_LOAD = System.currentTimeMillis();
+                                                        LOAD_TIME = General.random(7000, 36000);
+                                                    }
+                                                } else {
+                                                    performTimedActions();
+                                                }
+                                        }
+                                    }
+                                } else {
+                                    cannon[0].adjustCameraTo();
+                                    General.sleep(1200,3000);
+                                }
+                            } else {
+                                General.println("We ran out of balls to shove in our tinsy winsy wittle cannon");
+                                if (Clicking.click("Pick-up", cannon[0])) {
+                                    Timing.waitCondition(() -> cannon.length < 1, General.random(2500, 4100));
+                                    Vars.get().continueRunning = false;
+                                }
+                            }
+                        }
+                    }
+                }
+
+
+            case LOOT:
+
+                RSGroundItem[] lootlist = GroundItems.findNearest("Torstal seed", "Snapdragon seed", "Ranarr seed", "Long bone", "Curved bone");
+
+                if (Player.getPosition().distanceTo(Vars.get().CANNON_TILE) >= 25 && PathFinding.canReach(Vars.get().CANNON_TILE, false)) {
+                    General.println("Walking to Vars.get().CANNON_TILE with webwalking");
+                    if (WebWalking.walkTo(Vars.get().CANNON_TILE)) {
+                        Timing.waitCondition(() -> !Player.isMoving(), General.random(2500, 4100));
+                    }
+                } else {
+                    if (lootlist.length > 0 && lootlist[0] != null) {
+                        if (lootlist[0].isClickable() && lootlist[0].isOnScreen()) {
+                            if (Clicking.click("Take", lootlist[0])) {
+                                Timing.waitCondition(() -> !Player.isMoving() || lootlist.length < 1, General.random(2500, 4100));
+                                General.println("Attempting to loot " + lootlist[0].getDefinition().getName());
+                            }
+                        } else {
+                            if (DaxWalker.walkTo(lootlist[0].getPosition())) {
+                                Timing.waitCondition(() -> !Player.isMoving(), General.random(2500, 4100));
+                                General.println("walking to loot " + lootlist[0].getDefinition().getName());
+                            }
+                        }
+
+                    }
+                }
+
+                break;
+
+
+            case WALK_TO_AREA:
+                if (DaxWalker.walkTo(Vars.get().CANNON_AREA.getRandomTile())) {
+                    Timing.waitCondition(() -> !Player.isMoving(), General.random(2500, 4100));
+                }
+
+                break;
+
+
+            case FETCH_REQUIRED:
+                if (cannonExists() && !hasCannonFurnace()) {
+                    pick_up_cannon();
+                } else {
+                    if (!hasItem("Cannonball")) {
+                        withdrawFromBank(0, 2, false, true, RunescapeBank.NEAR);
+                    }
+                    if (Vars.get().USE_PPOTS) {
+                        if (!hasItem("Prayer potion")) {
+                            if (hasItem("Vial")) {
+                                depositToBank(0, 229, RunescapeBank.NEAR);
+                            } else {
+                                withdrawFromBank(20, 2434, false, true, RunescapeBank.NEAR);
+
+                            }
+
+                        }
+                        if (!hasItem("Lobster")) {
+                            withdrawFromBank(2, 379, false, true, RunescapeBank.NEAR);
+                        }
+                    }
+                }
+
+
+                break;
+
+        }
+        return 50;
+    }
+
+    private boolean setupCannon() {
+        RSItem[] cannonbase = Inventory.find("Cannon base");
+        if (cannonbase.length > 0) {
+            if (Clicking.click("Set-up", cannonbase[0])) {
+                Timing.waitCondition(() -> !hasItem("Cannon furnace"), General.random(8000, 10000));
+                Vars.get().cannonPlaced = true;
+                General.sleep(6000, 8000);
+                if (isCannonNear()) {
+                    //Vars.get().CBALLS_LEFT = 30;
+
+                    return true;
+                }
+            }
+        }
+
+        return true;
+    }
+
+
+    private boolean hasCannonFurnace() {
+        return hasItem("Cannon furnace");
+    }
+
+    private boolean brokenCannon() {
+        RSObject[] brokenCannon = Objects.findNearest(20, Filters.Objects.nameEquals("Broken mutlicannon").and(Filters.Objects.tileEquals(Vars.get().CANNON_TILE)));
+
+        return brokenCannon.length > 0;
+    }
+
+    private boolean lootOnFloor() {
+        RSGroundItem[] lootlist = GroundItems.findNearest("Torstal seed", "Snapdragon seed", "Ranarr seed", "Long bone", "Curved bone");
+        return lootlist.length > 0 && PathFinding.canReach(lootlist[0].getPosition(), false) && !Inventory.isFull();
+    }
+
+    //FETCH_REQUIRED, WALK_TO_AREA, SETUP_CANNON, RELOAD_CANNON, REPAIR_CANNON, LOOT, RETURN_TO_CANNON, OUT_OF_BALLS, HOPPING_WORLDS, PICK_UP_CANNON,ENDING , IDLE;
+
+    private boolean hasRequired() {
+        return cannonRequired() && ppotsAndFood() && hasCBRequired();
+
+    }
+
+    private boolean cannonRequired() {
+        if (Vars.get().cannonPlaced) {
+            return true;
+        } else {
+            if (hasCannonFurnace()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean ppotsAndFood() {
+        RSItem[] lob = Inventory.find("Lobster");
+        RSItem[] pp = Inventory.find(Filters.Items.nameContains("Prayer potion"));
+        if (Vars.get().USE_PPOTS) {
+            if (pp.length > 0 && lob.length > 0) {
+                return true;
+            } else {
+                return false;
+            }
+        } else {
+            return true;
+        }
+
+    }
+
+    private boolean hasCBRequired() {
+        RSItem[] cb = Inventory.find("Cannonball");
+        return cb.length > 0 && cb[0].getStack() > 30;
+    }
+
+    private State getState() {
+        if (inGame()) {
+            if (Skills.getCurrentLevel(Skills.SKILLS.RANGED) < Vars.get().ENDING_LEVEL) {
+                if (hasRequired()) {
+                    if (Vars.get().LOOTING && lootOnFloor()) {
+                        return State.LOOT;
+                    } else {
+                        if (Player.getPosition().distanceTo(Vars.get().CANNON_TILE) < 5) {
+                            if (hasCannonFurnace()) {
+                                if (freeWorld()) {
+                                    return State.SETUP_CANNON;
+                                } else {
+                                    return State.HOPPING_WORLDS;
+                                }
+                            } else {
+                                if (isCannonNear()) {
+                                    return State.RELOAD_CANNON;
+                                } else {
+                                    if (brokenCannon()) {
+                                        return State.REPAIR_CANNON;
+                                    }
+                                }
+                            }
+                        } else {
+                            return State.WALK_TO_AREA;
+                        }
+                    }
+                } else {
+                    return State.FETCH_REQUIRED;
+                }
+            } else {
+                return State.ENDING;
+            }
+        }
+        return State.IDLE;
+    }
+
+    public boolean inGame() {
+        return Login.getLoginState() == Login.STATE.INGAME;
+    }
+
+
+    public boolean freeWorld() {
+        final RSPlayer[] person = Players.getAll((p) -> !p.equals(Player.getRSPlayer()) && Player.getPosition().distanceTo(p) <= 8);
+        if (Vars.get().CANNON_AREA != null && Vars.get().CANNON_AREA.contains(Player.getPosition()) && person.length > 0 || cannonExists()) {
+            return false;
+        }
+
+        return true;
+    }
+
+
+    private boolean cannonExists() {
+        RSObject[] cannon = Objects.find(10, "Dwarf multicannon");
+        RSObject[] brokenCannon = Objects.find(10, "Broken multicannon");
+        return cannon.length > 0 || brokenCannon.length > 0;
+    }
+
+
+    private boolean isCannonNear() {
+        RSObject[] cannon = Objects.find(15, "Dwarf multicannon");
+
+        return cannonExists() && Player.getPosition().distanceTo(cannon[0]) < 15;
+
+    }
+
+
+    private boolean hasItem(String... ItemName) {
+        RSItem[] items = Inventory.find(ItemName);
+        return items.length > 0;
+    }
+
+    public void performTimedActions() {
+
+
+        if (abcInstance.shouldCheckXP()) {
+            abcInstance.checkXP();
+            General.sleep(General.randomSD(750, 1500, 1000, 150)); // sleep makes sure it checks xp longer.
+        }
+
+        if (abcInstance.shouldExamineEntity())
+            abcInstance.examineEntity();
+
+        if (abcInstance.shouldMoveMouse())
+            abcInstance.moveMouse();
+
+        if (abcInstance.shouldPickupMouse())
+            abcInstance.pickupMouse();
+
+        if (abcInstance.shouldRightClick())
+            abcInstance.rightClick();
+
+        if (abcInstance.shouldRotateCamera())
+            abcInstance.rotateCamera();
+
+
+        if (abcInstance.shouldLeaveGame())
+
+            abcInstance.leaveGame();
+
+    }
+
+    private void pick_up_cannon() {
+        RSObject[] cannon = Objects.find(10, "Dwarf multicannon");
+        if (cannon.length > 0) {
+            if (Clicking.click("Pick-up", cannon[0])) {
+                Timing.waitCondition(() -> hasCannonFurnace(), General.random(2500, 8000));
+                if (hasCannonFurnace()) {
+                    Vars.get().cannonPlaced = false;
+                }
+            }
+        }
+    }
+
+
+    @Override
+    public void onEnd() {
+        pick_up_cannon();
+        if (Vars.get().END_AT_GE) {
+            if (DaxWalker.walkTo(new Constants().gearea.getRandomTile())) {
+                Timing.waitCondition(() -> !Player.isMoving(), General.random(2500, 4100));
+            }
+        }
+
+    }
+
+    @Override
+    public void onBreakEnd() {
+
+    }
+
+    @Override
+    public void onBreakStart(long l) {
+        pick_up_cannon();
+        if (DaxWalker.walkTo(new Constants().gearea.getRandomTile())) {
+            Timing.waitCondition(() -> !Player.isMoving(), General.random(2500, 4100));
+        }
+    }
+
+    private boolean walkToGE() {
+        if (DaxWalker.walkTo(new Constants().gearea.getRandomTile())) {
+            Timing.waitCondition(() -> !Player.isMoving(), General.random(2500, 4100));
+        }
+        return true;
+    }
+
+    @Override
+    public void clanMessageReceived(String arg0, String arg1) {
+        // TODO Auto-generated method stub
+    }
+
+    @Override
+    public void personalMessageReceived(String arg0, String arg1) {
+
+    }
+
+    @Override
+    public void tradeRequestReceived(String arg0) {
+        // TODO Auto-generated method stub
+    }
+
+    @Override
+    public void duelRequestReceived(String arg0, String arg1) {
+        // TODO Auto-generated method stub
+    }
+
+    @Override
+    public void playerMessageReceived(String arg0, String arg1) {
+        // TODO Auto-generated method stub
+    }
+
+    @Override
+    public void serverMessageReceived(String arg0) {
+        if (arg0.contains("Your cannon is out")) {
+            earlyreload();
+            General.println("Reloaded because we are out of ammo");
+        }
+
+        if (arg0.equals("That isn't your cannon!")) {
+            General.println("Ending because we missclicked on someone elses cannon somehow");
+            Vars.get().continueRunning = false;
+        }
+
+
+    }
+
+    public enum State {
+        FETCH_REQUIRED, WALK_TO_AREA, SETUP_CANNON, RELOAD_CANNON, REPAIR_CANNON, LOOT, RETURN_TO_CANNON, OUT_OF_BALLS, HOPPING_WORLDS, PICK_UP_CANNON, ENDING, IDLE;
+    }
+
+
+    private void earlyreload() {
+        if (Vars.get().cannonPlaced) {
+            RSObject[] cannon = Objects.findNearest(8, Filters.Objects.nameEquals("Dwarf multicannon").and(Filters.Objects.inArea(Vars.get().CANNON_AREA)));
+            RSItem[] cannonballs = Inventory.find("Cannonball");
+
+            if (cannon.length > 0) {
+                if (cannonballs.length > 0) {
+                    if (Vars.get().CANNON_AREA.contains(Player.getPosition())) {
+                        RSObjectDefinition definitionCheck = cannon[0].getDefinition();
+                        if (definitionCheck != null) {
+                            if (cannon[0].getDefinition().getActions()[0].contains("Fire")) {
+                                if (Clicking.click("Fire", cannon[0])) {
+                                    General.sleep(1500, 3000);
+                                    LAST_LOAD = System.currentTimeMillis();
+                                    LOAD_TIME = General.random(7000, 36000);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    General.println("We ran out of balls to shove in our tinsy winsy wittle cannon");
+                    if (Clicking.click("Pick-up", cannon[0])) {
+                        Timing.waitCondition(() -> cannon.length < 1, General.random(2500, 4100));
+                        Vars.get().continueRunning = false;
+                    }
+                }
+            }
+        }
+    }
+
+    public boolean isAtBank() {
+        RSObject[] bank = Objects.findNearest(15, "Bank booth", "Bank chest", "Bank Booth", "Open chest");
+        RSNPC[] banker = NPCs.findNearest("Banker");
+        return bank.length > 0 && bank[0] != null || banker.length > 0 && banker[0] != null;
+    }
+
+    public void withdrawFromBank(int withdrawAmount, int itemID, boolean noteItems, boolean stopScript, RunescapeBank bankName) {
+        RSItem[] item = Banking.find(itemID);
+        RSItem[] inventoryHasItem = Inventory.find(itemID);
+        int withdrawID;
+
+        if (inventoryHasItem.length < 1) {
+            if (isAtBank()) {
+                if (Banking.isBankScreenOpen()) {
+                    if (item.length > 0) {
+                        if (noteItems) {
+                            if (Game.getSetting(115) != 1) {
+                                RSInterface noteButton = Interfaces.get(12, 24);
+                                if (noteButton != null) {
+                                    if (noteButton.click())
+                                        Timing.waitCondition(() -> Game.getSetting(115) == 1, General.random(1500, 2000));
+                                }
+                            }
+                            withdrawID = itemID + 1;
+                        } else {
+                            withdrawID = itemID;
+                        }
+                        if (Banking.withdraw(withdrawAmount, withdrawID)) {
+                            Timing.waitCondition(() -> inventoryHasItem.length > 0, General.random(1500, 2000));
+                        }
+                    } else {
+                        General.println("Out of supplies");
+                        if (stopScript) {
+                            stopScript();
+                        } else {
+                            //restock
+                        }
+                    }
+                } else {
+                    if (Banking.openBank()) {
+                        Timing.waitCondition(() -> Banking.isBankScreenOpen(), General.random(2500, 4100));
+                    }
+                }
+            } else {
+                if (bankName.equals(RunescapeBank.NEAR)) {
+                    General.println("Using nearest bank");
+                    if (DaxWalker.walkToBank()) {
+                        Timing.waitCondition(() -> !Player.isMoving(), General.random(2500, 4100));
+                    }
+                } else {
+                    if (DaxWalker.walkToBank(bankName)) {
+                        Timing.waitCondition(() -> !Player.isMoving(), General.random(2500, 4100));
+                    }
+                }
+            }
+        }
+
+    }
+
+    public void depositToBank(int depositAmount, int itemID, RunescapeBank bankName) {
+        RSItem[] item = Banking.find(itemID);
+        RSItem[] inventoryHasItem = Inventory.find(itemID);
+        int withdrawID;
+        if (inventoryHasItem.length > 0) {
+            if (isAtBank()) {
+                if (Banking.isBankScreenOpen()) {
+                    if (Banking.deposit(depositAmount, itemID)) {
+                        General.sleep(700, 1200);
+                    }
+                } else {
+                    if (Banking.openBank()) {
+                        Timing.waitCondition(() -> Banking.isBankScreenOpen(), General.random(2500, 4100));
+                    }
+                }
+            } else {
+                if (bankName.equals(RunescapeBank.NEAR)) {
+                    General.println("Using nearest bank");
+                    if (DaxWalker.walkToBank()) {
+                        Timing.waitCondition(() -> !Player.isMoving(), General.random(2500, 4100));
+                    }
+                } else {
+                    if (DaxWalker.walkToBank(bankName)) {
+                        Timing.waitCondition(() -> !Player.isMoving(), General.random(2500, 4100));
+                    }
+                }
+            }
+        }
+
+    }
+    
+}
