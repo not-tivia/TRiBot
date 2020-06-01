@@ -50,6 +50,7 @@ public class main extends Script implements Painting, MessageListening07, Breaki
 
     @Override
     public void onPaint(Graphics g) {
+        RSObject[] obj = Objects.findNearest(15,"Dwarf multicannon");
         NumberFormat.getInstance();
         long runtime = System.currentTimeMillis() - Vars.get().START_TIME;
         long xpGained = Skills.getXP(Skills.SKILLS.RANGED) - Vars.get().startingXP;
@@ -71,6 +72,7 @@ public class main extends Script implements Painting, MessageListening07, Breaki
         g.drawString("Has required cannon parts " + cannonRequired(), 5, 260);
         g.drawString("Has food and pots required " + ppotsAndFood(), 5, 280);
         g.drawString("Has cannonballs" + hasCBRequired(), 5, 300);
+        g.drawString("cannon exists" + obj.length, 5, 320);
        /*
         if (Vars.get().CANNON_TILE!=null){
            g.drawPolygon(Projection.getTileBoundsPoly(Vars.get().CANNON_TILE, 0));
@@ -323,51 +325,53 @@ public class main extends Script implements Painting, MessageListening07, Breaki
                     }
 
                     //Cannon reloading
-                    if (Vars.get().cannonPlaced) {
 
-                        RSObject cannon = Entities.find(ObjectEntity::new).nameContains("cannon").tileEquals(Vars.get().CANNON_TILE).getFirstResult();
-                        if (cannon != null) {
-                            //RSObject[] cannon = Objects.findNearest(25, Filters.Objects.nameContains("Dwarf multicannon").and(Filters.Objects.inArea(Vars.get().CANNON_AREA)));
-                            RSItem[] cannonballs = Inventory.find("Cannonball");
-                            General.println("cannon placed");
-
-                            General.println("cannon found");
-                            if (cannonballs.length > 0) {
-                                General.println("cannonball found");
-                                if (Player.getPosition().distanceTo(cannon) < 15 && cannon.isOnScreen() && cannon.isOnScreen()) {
-                                    General.println("Reload in cannon area");
-                                    RSObjectDefinition definitionCheck = cannon.getDefinition();
-                                    if (definitionCheck != null) {
-                                        if (cannon.getDefinition().getActions()[0].contains("Fire")) {
-                                            General.println("we need to fire cannon");
-                                            if (System.currentTimeMillis() - LAST_LOAD >= LOAD_TIME) {
-                                                if (Clicking.click("Fire", cannon)) {
-                                                    General.sleep(1500, 3000);
-                                                    LAST_LOAD = System.currentTimeMillis();
-                                                    LOAD_TIME = General.random(7000, 36000);
+                        if (Vars.get().CANNON_TILE!=null) {
+                            General.println("cannon tile is not null");
+                            RSObject cannon = Entities.find(ObjectEntity::new).nameContains("cannon").tileEquals(Vars.get().CANNON_TILE).getFirstResult();
+                            if (cannon != null) {
+                                //RSObject[] cannon = Objects.findNearest(25, Filters.Objects.nameContains("Dwarf multicannon").and(Filters.Objects.inArea(Vars.get().CANNON_AREA)));
+                                RSItem[] cannonballs = Inventory.find("Cannonball");
+                                General.println("cannon placed");
+                                General.println("cannon found");
+                                if (cannonballs.length > 0) {
+                                    General.println("cannonball found");
+                                    if (Player.getPosition().distanceTo(cannon) < 15 && cannon.isOnScreen() && cannon.isOnScreen()) {
+                                        General.println("Reload in cannon area");
+                                        RSObjectDefinition definitionCheck = cannon.getDefinition();
+                                        if (definitionCheck != null) {
+                                            if (cannon.getDefinition().getActions()[0].contains("Fire")) {
+                                                General.println("we need to fire cannon");
+                                                if (System.currentTimeMillis() - LAST_LOAD >= LOAD_TIME) {
+                                                    if (Clicking.click("Fire", cannon)) {
+                                                        General.sleep(1500, 3000);
+                                                        LAST_LOAD = System.currentTimeMillis();
+                                                        LOAD_TIME = General.random(7000, 36000);
+                                                    }
+                                                } else {
+                                                    performTimedActions();
                                                 }
-                                            } else {
-                                                performTimedActions();
                                             }
                                         }
+                                    } else {
+                                        cannon.adjustCameraTo();
+                                        General.sleep(1200, 3000);
                                     }
                                 } else {
-                                    cannon.adjustCameraTo();
-                                    General.sleep(1200, 3000);
+                                    General.println("We ran out of balls to shove in our tinsy winsy wittle cannon");
+                                    if (Clicking.click("Pick-up", cannon)) {
+                                        Timing.waitCondition(() -> cannon == null, General.random(2500, 4100));
+                                        Vars.get().continueRunning = false;
+                                    }
                                 }
                             } else {
-                                General.println("We ran out of balls to shove in our tinsy winsy wittle cannon");
-                                if (Clicking.click("Pick-up", cannon)) {
-                                    Timing.waitCondition(() -> cannon == null, General.random(2500, 4100));
-                                    Vars.get().continueRunning = false;
-                                }
+                                General.println("cannon is returning null");
                             }
-                        } else {
-                            General.println("cannon is returning null");
                         }
-                    }
+                        }
 
-                }
+
+
 
 
             case LOOT:
@@ -516,7 +520,7 @@ public class main extends Script implements Painting, MessageListening07, Breaki
                     if (Vars.get().LOOTING && lootOnFloor()) {
                         return State.LOOT;
                     } else {
-                        if (Player.getPosition().distanceTo(Vars.get().CANNON_TILE) <= 8) {
+                        if (Vars.get().CANNON_AREA.contains(Player.getPosition())) {
                             if (hasCannonFurnace()) {
                                 if (freeWorld()) {
                                     return State.SETUP_CANNON;
@@ -571,7 +575,7 @@ public class main extends Script implements Painting, MessageListening07, Breaki
     private boolean isCannonNear() {
         RSObject[] cannon = Objects.find(15, "Dwarf multicannon");
 
-        return cannonExists() && Player.getPosition().distanceTo(cannon[0].getPosition()) < 15;
+        return cannonExists();
 
     }
 
@@ -819,5 +823,7 @@ public class main extends Script implements Painting, MessageListening07, Breaki
         }
 
     }
+
+
 
 }
