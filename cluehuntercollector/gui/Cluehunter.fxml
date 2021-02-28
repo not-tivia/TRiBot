@@ -50,14 +50,13 @@
       <menus>
         <Menu mnemonicParsing="false" text="File">
           <items>
-            <MenuItem fx:id="menunew" mnemonicParsing="false"  text="New" />
-            <MenuItem fx:id="menuopen" mnemonicParsing="false"  text="Open…" />
+            <MenuItem fx:id="menunew" mnemonicParsing="false" onAction="#menunew" text="New" />
+            <MenuItem fx:id="menuopen" mnemonicParsing="false" onAction="#menuopen" text="Open…" />
             <SeparatorMenuItem mnemonicParsing="false" />
-            <MenuItem fx:id="menusavee" mnemonicParsing="false"  text="Save" />
-              
-            <MenuItem fx:id="menusaveas" mnemonicParsing="false" text="Save As…" />
+            <MenuItem fx:id="menusave" mnemonicParsing="false" onAction="#menusave" text="Save" />
+            <MenuItem fx:id="menusaveas" mnemonicParsing="false" onAction="#menusaveas" text="Save As…" />
             <SeparatorMenuItem mnemonicParsing="false" />
-            <MenuItem fx:id="menuquit" mnemonicParsing="false"  text="Quit" />
+            <MenuItem fx:id="menuquit" mnemonicParsing="false" onAction="#menuquit" text="Quit" />
           </items>
         </Menu>
         <Menu mnemonicParsing="false" text="Help">
@@ -71,24 +70,24 @@
     </MenuBar>
     <AnchorPane maxHeight="-1.0" maxWidth="-1.0" prefHeight="346.0" prefWidth="310.0" VBox.vgrow="ALWAYS">
          <children>
-            <Button layoutX="241.0" layoutY="233.0" mnemonicParsing="false" prefHeight="3.0" prefWidth="146.0" text="Start script" />
+            <Button fx:id="startbutton" layoutX="241.0" layoutY="233.0" mnemonicParsing="false" onAction="#startscriptpressed" prefHeight="3.0" prefWidth="146.0" text="Start script" />
             <Label layoutX="14.0" layoutY="14.0" text="Clue hunter gear to collect">
                <font>
                   <Font name="System Bold" size="12.0" />
                </font>
             </Label>
-            <CheckBox layoutX="14.0" layoutY="47.0" mnemonicParsing="false" text="Helm of raedwald" />
-            <CheckBox layoutX="14.0" layoutY="155.0" mnemonicParsing="false" text="Clue hunter garb" />
-            <CheckBox layoutX="14.0" layoutY="182.0" mnemonicParsing="false" text="Clue hunter trousers" />
+            <CheckBox fx:id="helmcheckbox" layoutX="14.0" layoutY="47.0" mnemonicParsing="false" text="Helm of raedwald" />
+            <CheckBox fx:id="garbcheckbox" layoutX="14.0" layoutY="155.0" mnemonicParsing="false" text="Clue hunter garb" />
+            <CheckBox fx:id="trouserscheckbox" layoutX="14.0" layoutY="182.0" mnemonicParsing="false" text="Clue hunter trousers" />
             <Label layoutX="33.0" layoutY="71.0" prefHeight="17.0" prefWidth="208.0" text="Please note that for collecting" />
             <Label layoutX="33.0" layoutY="88.0" text="the helm, you will need a nature" />
             <Label layoutX="33.0" layoutY="105.0" text="rune, leather boots, and a super-" />
             <Label layoutX="33.0" layoutY="122.0" text="-antiposion(1)." />
-            <CheckBox layoutX="14.0" layoutY="209.0" mnemonicParsing="false" text="Clue hunter boots and gloves" />
-            <CheckBox layoutX="14.0" layoutY="237.0" mnemonicParsing="false" text="Clue hunter cloak" />
-            <CheckBox fx:id="usefood" layoutX="241.0" layoutY="71.0" mnemonicParsing="false" text="Use food" />
+            <CheckBox fx:id="bootsandglovescheckbox" layoutX="14.0" layoutY="209.0" mnemonicParsing="false" text="Clue hunter boots and gloves" />
+            <CheckBox fx:id="cloakcheckbox" layoutX="14.0" layoutY="237.0" mnemonicParsing="false" text="Clue hunter cloak" />
+            <CheckBox fx:id="foodcheckbox" layoutX="241.0" layoutY="71.0" mnemonicParsing="false" text="Use food" />
             <ChoiceBox fx:id="foodchoice" layoutX="241.0" layoutY="93.0" prefHeight="25.0" prefWidth="129.0" />
-            <CheckBox fx:id="usestamina" layoutX="241.0" layoutY="47.0" mnemonicParsing="false" text="Use stamina potions" />
+            <CheckBox fx:id="staminacheckbox" layoutX="241.0" layoutY="47.0" mnemonicParsing="false" text="Use stamina potions" />
          </children></AnchorPane>
   </children>
 </VBox>
