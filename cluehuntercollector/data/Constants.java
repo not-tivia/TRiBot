@@ -5,6 +5,9 @@ import org.tribot.api2007.types.RSArea;
 import org.tribot.api2007.types.RSItem;
 import org.tribot.api2007.types.RSTile;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class Constants {
 
     public final static RSArea AREA_GE = new RSArea(new RSTile(3157, 3496, 0), new RSTile(3171, 3482, 0));
@@ -23,8 +26,7 @@ public class Constants {
 
     public final static long startTime = Timing.currentTimeMillis();
 
-    public final static String foodTypes[] = "Trout, Lobster";
-
+    public final static String[] foodChoiceArray = {"Jug of wine", "Trout", "Lobster", "Shark"};
 
 
 
