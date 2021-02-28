@@ -110,7 +110,7 @@ public class Controller extends AbstractGUIController {
     private CheckBox food;
 
     @FXML @DoNotRename
-    private ChoiceBox foodChoice;
+    private ChoiceBox foodchoice;
 
 
     @FXML @DoNotRename
@@ -180,7 +180,7 @@ public class Controller extends AbstractGUIController {
     @Override
     public void initialize(URL arg0, ResourceBundle arg1){
         //ToDo
-            foodChoice.setItems(FXCollections.observableArrayList(foodChoiceArray));
+            foodchoice.setItems(FXCollections.observableArrayList(foodChoiceArray));
 
 
         //reloadChoice.setItems(FXCollections.observableArrayList("Hybrid"));
