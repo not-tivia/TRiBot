@@ -50,10 +50,10 @@
       <menus>
         <Menu mnemonicParsing="false" text="File">
           <items>
-            <MenuItem fx:id="menunew" mnemonicParsing="false"  text="New" />
-            <MenuItem fx:id="menuopen" mnemonicParsing="false"  text="Open…" />
+            <MenuItem fx:id="menunew" mnemonicParsing="false" text="New" />
+            <MenuItem fx:id="menuopen" mnemonicParsing="false" text="Open…" />
             <SeparatorMenuItem mnemonicParsing="false" />
-            <MenuItem fx:id="menusave" mnemonicParsing="false"  text="Save" />
+            <MenuItem fx:id="menusave" mnemonicParsing="false" text="Save" />
             <MenuItem fx:id="menusaveas" mnemonicParsing="false" text="Save As…" />
             <SeparatorMenuItem mnemonicParsing="false" />
             <MenuItem fx:id="menuquit" mnemonicParsing="false" text="Quit" />
