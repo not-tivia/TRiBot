@@ -23,7 +23,7 @@ public class Constants {
 
     public final static long startTime = Timing.currentTimeMillis();
 
-    public final static RSItem foodTypes[] = "Trout, Lobster";
+    public final static String foodTypes[] = "Trout, Lobster";
 
 
 
