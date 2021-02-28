@@ -5,15 +5,24 @@ import com.allatori.annotations.DoNotRename;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
+import javafx.event.ActionEvent;
+import javafx.event.EventHandler;
 import javafx.fxml.FXML;
-import javafx.scene.control.Button;
-import javafx.scene.control.CheckBox;
+import javafx.scene.Group;
+import javafx.scene.Scene;
+import javafx.scene.control.*;
 
-import javafx.scene.control.ChoiceBox;
+import javafx.scene.image.ImageView;
+import javafx.scene.paint.Color;
+import javafx.stage.FileChooser;
+import javafx.stage.Stage;
 import org.tribot.api.General;
 
+import org.tribot.util.Util;
 import scripts.api.dax_api.shared.jsonSimple.JSONObject;
-
+import scripts.cluehuntercollector.data.Constants;
+import scripts.cluehuntercollector.data.Vars;
 
 
 import java.io.*;
@@ -21,14 +30,34 @@ import java.net.URL;
 
 import java.util.ResourceBundle;
 
-import static scripts.cluehuntercollector.ClueHunterCollector.GUIPATH;
+import static scripts.cluehuntercollector.data.Constants.FOOD_NAMES_STRINGS;
+
 
 @DoNotRename
 public class Controller extends AbstractGUIController {
 
-    private static FileWriter file;
+    private File directory = new File(Util.getWorkingDirectory()  + File.separator + "adamhackz" + File.separator + "cluehuntercollector");
+
+    /*
+    Food
+     */
+
+    /*
+    Load
+     */
+
+    /*
+    Save
+     */
+
+    /*
+    Start
+     */
 
     private void saveSettings() {
+        if (!directory.exists())
+            directory.mkdirs();
+
             try {
                 JSONObject settings = new JSONObject();
                 settings.clear();
@@ -59,7 +88,7 @@ public class Controller extends AbstractGUIController {
     @Override
     public void initialize(URL arg0, ResourceBundle arg1){
     //ToDo
-        //foodType.setItems(FXCollections.observableArrayList(Constants.Locations.values()));
+        foodType.setItems(FXCollections.observableArrayList(FOOD_NAMES_STRINGS));
         //reloadChoice.setItems(FXCollections.observableArrayList("Hybrid"));
         //worldType.setItems(FXCollections.observableArrayList(main.World.values()));
 
@@ -96,46 +125,67 @@ public class Controller extends AbstractGUIController {
     @FXML @DoNotRename
     private Button startScriptButton;
 
-    /*
-    @FXML
-    public void setSetCannonTileButtonPressed(){
-        Vars.get().CANNON_TILE = Player.getPosition();
-    }
-
-     */
-
-
-
-
-
     @FXML @DoNotRename
-    public void startScriptPressed(){
+    private Menu menusave;
+
+
+
+
+    @FXML@DoNotRename
+    public void startScriptPressed() {
         saveSettings();
 
-
-        if (cloak.isSelected()){
+        if (cloak.isSelected()) {
             General.println("Clue hunter cloak added to task list.");
         }
-        if (garb.isSelected()){
+        if (garb.isSelected()) {
             General.println("Clue hunter garb added to task list.");
         }
-        if (bootsandgloves.isSelected()){
+        if (bootsandgloves.isSelected()) {
             General.println("Clue hunter boots and gloves added to task list.");
         }
-        if (trousers.isSelected()){
+        if (trousers.isSelected()) {
             General.println("Clue hunter trousers added to task list.");
         }
-        if (helm.isSelected()){
+        if (helm.isSelected()) {
             General.println("Clue hunter helm added to task list.");
         }
-        if (startScriptButton.isPressed()){
+        if (startScriptButton.isPressed()) {
             General.println("Starting script..");
         }
 
-
-
         this.getGUI().close();
     }
+
+    @FXML
+    public void menuSaveOpen(Stage stage){
+        ImageView imgView = new ImageView("UIControls/Save.png");
+        imgView.setFitWidth(20);
+        imgView.setFitHeight(20);
+        Menu file = new Menu("File");
+        MenuItem item = new MenuItem("Save", imgView);
+        file.getItems().addAll(item);
+        //Creating a File chooser
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Save");
+        fileChooser.getExtensionFilters().addAll(new FileChooser.ExtensionFilter("All Files", "*.*"));
+        //Adding action on the menu item
+        item.setOnAction(new EventHandler<ActionEvent>() {
+            public void handle(ActionEvent event) {
+                //Opening a dialog box
+                fileChooser.showSaveDialog(stage);
+            }
+        });
+        //Creating a menu bar and adding menu to it.
+        MenuBar menuBar = new MenuBar(file);
+        Group root = new Group(menuBar);
+        Scene scene = new Scene(root, 595, 355, Color.BEIGE);
+        stage.setTitle("File Chooser Example");
+        stage.setScene(scene);
+        stage.show();
+    }
+
+
 
 
 
