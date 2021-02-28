@@ -30,7 +30,7 @@ import java.net.URL;
 
 import java.util.ResourceBundle;
 
-import static scripts.cluehuntercollector.data.Constants.FOOD_NAMES_STRINGS;
+import static scripts.cluehuntercollector.data.Constants.foodChoiceArray;
 
 
 @DoNotRename
@@ -85,15 +85,6 @@ public class Controller extends AbstractGUIController {
         }
     }
 
-    @Override
-    public void initialize(URL arg0, ResourceBundle arg1){
-    //ToDo
-        foodType.setItems(FXCollections.observableArrayList(FOOD_NAMES_STRINGS));
-        //reloadChoice.setItems(FXCollections.observableArrayList("Hybrid"));
-        //worldType.setItems(FXCollections.observableArrayList(main.World.values()));
-
-    }
-
 
 
 
@@ -119,7 +110,7 @@ public class Controller extends AbstractGUIController {
     private CheckBox food;
 
     @FXML @DoNotRename
-    private ChoiceBox foodType;
+    private ChoiceBox foodChoice;
 
 
     @FXML @DoNotRename
@@ -184,6 +175,19 @@ public class Controller extends AbstractGUIController {
         stage.setScene(scene);
         stage.show();
     }
+
+
+    @Override
+    public void initialize(URL arg0, ResourceBundle arg1){
+        //ToDo
+            foodChoice.setItems(FXCollections.observableArrayList(foodChoiceArray));
+
+
+        //reloadChoice.setItems(FXCollections.observableArrayList("Hybrid"));
+        //worldType.setItems(FXCollections.observableArrayList(main.World.values()));
+
+    }
+
 
 
 
