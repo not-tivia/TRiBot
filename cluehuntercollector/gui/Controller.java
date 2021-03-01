@@ -28,6 +28,7 @@ import scripts.cluehuntercollector.data.Vars;
 import java.io.*;
 import java.net.URL;
 
+import java.util.ArrayList;
 import java.util.ResourceBundle;
 
 import static scripts.cluehuntercollector.data.Constants.foodChoiceArray;
@@ -46,135 +47,140 @@ public class Controller extends AbstractGUIController {
     Load
      */
 
+
     /*
     Save
      */
+
+
+    private String[] getSaveFiles() {
+        ArrayList<String> settings = new ArrayList<String>();
+        if (!directory.exists())
+            return new String[] {"No Saved Settings Found"};
+        else {
+            for (File f : directory.listFiles()) {
+                if (f.isFile())
+                    settings.add(f.getName());
+            }
+            return settings.toArray(new String[settings.size()]);
+        }
+    }
 
     /*
     Start
      */
 
-    private void saveSettings() {
-        if (!directory.exists())
-            directory.mkdirs();
-
-            try {
-                JSONObject settings = new JSONObject();
-                settings.clear();
-                settings.put("helm", String.valueOf(helm.isSelected()));
-                settings.put("bootsandgloves", String.valueOf(bootsandgloves.isSelected()));
-                settings.put("garb", String.valueOf(garb.isSelected()));
-                settings.put("cloak", String.valueOf(cloak.isSelected()));
-                settings.put("trousers", String.valueOf(trousers.isSelected()));
-                try (Writer writer = new FileWriter("Output.json")){
-                    Gson gson = new GsonBuilder().create();
-                    gson.toJson(settings,writer);
-                }
-            } catch (Exception ex) {
-                    System.out.println("Unable to save settings " + ex.toString());
-            }
-
-    }
-
-    public void loadSettings() {   //we will call this externally
-        try {
-
-        } catch (Exception e2) {
-            System.out.print("Unable to load settings");
-            e2.printStackTrace();
-        }
-    }
 
 
 
 
     @FXML @DoNotRename
-    private CheckBox helm;
+    private CheckBox helmcheckbox;
 
     @FXML @DoNotRename
-    private CheckBox bootsandgloves;
+    private CheckBox bootsandglovescheckbox;
 
     @FXML @DoNotRename
-    private CheckBox garb;
+    private CheckBox garbcheckbox;
 
     @FXML @DoNotRename
-    private CheckBox cloak;
+    private CheckBox cloakcheckbox;
 
     @FXML @DoNotRename
-    private CheckBox trousers;
+    private CheckBox trouserscheckbox;
 
     @FXML @DoNotRename
-    private CheckBox staminas;
+    private CheckBox staminacheckbox;
 
     @FXML @DoNotRename
-    private CheckBox food;
+    private CheckBox foodcheckbox;
 
     @FXML @DoNotRename
     private ChoiceBox foodchoice;
 
+    @FXML @DoNotRename
+    private MenuItem menusave;
+
 
     @FXML @DoNotRename
-    private Button startScriptButton;
+    private Button startbutton;
 
     @FXML @DoNotRename
-    private Menu menusave;
+    private MenuItem menusaveas;
 
+    @FXML @DoNotRename
+    public void menunewpressed(){
 
+    }
 
+    @FXML @DoNotRename
+    public void menuopenpressed(){
 
-    @FXML@DoNotRename
-    public void startScriptPressed() {
-        saveSettings();
+    }
 
-        if (cloak.isSelected()) {
+    @FXML @DoNotRename
+    public void menusaveaspressed(){
+        if (!directory.exists())
+            directory.mkdirs();
+        try {
+            JSONObject settings = new JSONObject();
+            settings.clear();
+            settings.put("helm", String.valueOf(helmcheckbox.isSelected()));
+            settings.put("bootsandgloves", String.valueOf(bootsandglovescheckbox.isSelected()));
+            settings.put("garb", String.valueOf(garbcheckbox.isSelected()));
+            settings.put("cloak", String.valueOf(cloakcheckbox.isSelected()));
+            settings.put("trousers", String.valueOf(trouserscheckbox.isSelected()));
+            try (Writer writer = new FileWriter("Output.json")){
+                Gson gson = new GsonBuilder().create();
+                gson.toJson(settings,writer);
+                General.println(gson.toJson(settings));
+
+            }
+            General.println("Settings saved successfully.");
+        } catch (IOException e) {
+            General.println("Error attempting to save settings.");
+            e.printStackTrace();
+        }
+    }
+
+    @FXML @DoNotRename
+    public void startscriptpressed() {
+        if (foodcheckbox.isSelected()){
+            General.println("We are using food.");
+        } else {
+            General.println("We are not using food.");
+        }
+
+        if (cloakcheckbox.isSelected()){
             General.println("Clue hunter cloak added to task list.");
         }
-        if (garb.isSelected()) {
+        if (garbcheckbox.isSelected()){
             General.println("Clue hunter garb added to task list.");
+
         }
-        if (bootsandgloves.isSelected()) {
+        if (bootsandglovescheckbox.isSelected()){
             General.println("Clue hunter boots and gloves added to task list.");
+
         }
-        if (trousers.isSelected()) {
+        if (trouserscheckbox.isSelected()){
             General.println("Clue hunter trousers added to task list.");
+
         }
-        if (helm.isSelected()) {
+        if (helmcheckbox.isSelected()){
             General.println("Clue hunter helm added to task list.");
+
         }
-        if (startScriptButton.isPressed()) {
-            General.println("Starting script..");
+        if (startbutton.isPressed()){
+            General.println("Startscript button has been pressed.");
         }
+
+//save settings
+
 
         this.getGUI().close();
     }
 
-    @FXML
-    public void menuSaveOpen(Stage stage){
-        ImageView imgView = new ImageView("UIControls/Save.png");
-        imgView.setFitWidth(20);
-        imgView.setFitHeight(20);
-        Menu file = new Menu("File");
-        MenuItem item = new MenuItem("Save", imgView);
-        file.getItems().addAll(item);
-        //Creating a File chooser
-        FileChooser fileChooser = new FileChooser();
-        fileChooser.setTitle("Save");
-        fileChooser.getExtensionFilters().addAll(new FileChooser.ExtensionFilter("All Files", "*.*"));
-        //Adding action on the menu item
-        item.setOnAction(new EventHandler<ActionEvent>() {
-            public void handle(ActionEvent event) {
-                //Opening a dialog box
-                fileChooser.showSaveDialog(stage);
-            }
-        });
-        //Creating a menu bar and adding menu to it.
-        MenuBar menuBar = new MenuBar(file);
-        Group root = new Group(menuBar);
-        Scene scene = new Scene(root, 595, 355, Color.BEIGE);
-        stage.setTitle("File Chooser Example");
-        stage.setScene(scene);
-        stage.show();
-    }
+
 
 
     @Override
