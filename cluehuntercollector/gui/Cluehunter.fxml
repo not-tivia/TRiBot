@@ -53,7 +53,7 @@
             <MenuItem fx:id="menunew" mnemonicParsing="false" onAction="#menunewpressed" text="New" />
             <MenuItem fx:id="menuopen" mnemonicParsing="false" onAction="#menuopenpressed" text="Open…" />
             <SeparatorMenuItem mnemonicParsing="false" />
-            <MenuItem fx:id="menusaveas" mnemonicParsing="false" onAction="#menusaveaspressed" text="Save As…" />
+            <MenuItem fx:id="menusave" mnemonicParsing="false" onAction="#menusavepressed" text="Save…" />
             <SeparatorMenuItem mnemonicParsing="false" />
             <MenuItem fx:id="menuquit" mnemonicParsing="false" text="Quit" />
           </items>
