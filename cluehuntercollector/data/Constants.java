@@ -2,11 +2,7 @@ package scripts.cluehuntercollector.data;
 
 import org.tribot.api.Timing;
 import org.tribot.api2007.types.RSArea;
-import org.tribot.api2007.types.RSItem;
 import org.tribot.api2007.types.RSTile;
-
-import java.util.ArrayList;
-import java.util.List;
 
 public class Constants {
 
@@ -26,8 +22,7 @@ public class Constants {
 
     public final static long startTime = Timing.currentTimeMillis();
 
-    public final static String[] foodChoiceArray = {"Jug of wine", "Trout", "Lobster", "Shark"};
-
+    public final static String[] foodChoiceArray = { "Trout", "Lobster", "Shark"};
 
 
 }

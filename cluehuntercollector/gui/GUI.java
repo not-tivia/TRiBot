@@ -22,7 +22,6 @@ import java.util.Properties;
 public class GUI extends Application {
 
 
-
     private final URL fxml;
     private final URL stylesheet;
 
@@ -32,6 +31,7 @@ public class GUI extends Application {
     private boolean decorated = true;
 
     private boolean isOpen = false;
+    private Properties prop;
 
     public GUI(URL fxml) {
         this(fxml, null);
@@ -109,8 +109,8 @@ public class GUI extends Application {
 
         //LANScript script = Vars.get().get("script");
 
-       // if (script != null)
-         //   stage.setTitle(script.getScriptName());
+        // if (script != null)
+        //   stage.setTitle(script.getScriptName());
 
 //        stage.setAlwaysOnTop(true);
 
@@ -175,17 +175,14 @@ public class GUI extends Application {
         return isOpen;
     }
 
-    private void waitForInit() {
-        Timing.waitCondition(() -> stage != null, General.random(5000, 6000));
-
-    }
-
     /*
     Saving and loading
      */
 
-    private Properties prop;
+    private void waitForInit() {
+        Timing.waitCondition(() -> stage != null, General.random(5000, 6000));
 
+    }
 
 
 }

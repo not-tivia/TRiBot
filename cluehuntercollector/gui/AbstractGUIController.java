@@ -1,7 +1,6 @@
 package scripts.cluehuntercollector.gui;
 
 import javafx.fxml.Initializable;
-import scripts.cluehuntercollector.gui.GUI;
 
 
 /**
@@ -13,11 +12,11 @@ public abstract class AbstractGUIController implements Initializable {
 
     private GUI gui = null;
 
-    public void setGUI(GUI gui) {
-        this.gui = gui;
-    }
-
     public GUI getGUI() {
         return this.gui;
+    }
+
+    public void setGUI(GUI gui) {
+        this.gui = gui;
     }
 }

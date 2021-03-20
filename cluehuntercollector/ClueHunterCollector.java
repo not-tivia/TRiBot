@@ -1,10 +1,10 @@
 package scripts.cluehuntercollector;
 
-import javafx.application.Platform;
 import org.tribot.api.Clicking;
 import org.tribot.api.General;
 import org.tribot.api.Timing;
 import org.tribot.api.input.Mouse;
+import org.tribot.api.util.abc.ABCUtil;
 import org.tribot.api2007.*;
 import org.tribot.api2007.ext.Filters;
 import org.tribot.api2007.types.RSInterface;
@@ -22,6 +22,7 @@ import scripts.api.FluffeePaint.PaintInfo;
 import scripts.api.dax_api.api_lib.DaxWalker;
 import scripts.api.dax_api.api_lib.models.DaxCredentials;
 import scripts.api.dax_api.api_lib.models.DaxCredentialsProvider;
+import scripts.api.dax_api.walker_engine.WalkingCondition;
 import scripts.api.interaction.Interactions;
 import scripts.cluehuntercollector.data.Constants;
 import scripts.cluehuntercollector.gui.GUI;
@@ -32,23 +33,20 @@ import java.io.File;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.text.NumberFormat;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 
 import static scripts.api.FluffeePaint.FluffeesPaint.PaintLocations.INVENTORY_AREA;
 import static scripts.cluehuntercollector.data.Constants.AREA_GE;
 import static scripts.cluehuntercollector.data.Constants.AREA_SPADE;
-import static scripts.cluehuntercollector.data.Vars.hasCheckedBank;
-import static scripts.cluehuntercollector.data.Vars.needsSpade;
+import static scripts.cluehuntercollector.data.Vars.*;
 
 @ScriptManifest(authors = {"adamhackz"}, category = "Tools", name = "ClueHunterCollector", description = "Collects the clue hunter outfit for wintertodt/fashionscape", version = 1)
 
 
 public class ClueHunterCollector extends Script implements Painting, PaintInfo, MessageListening07, Arguments {
 
-    public static final File GUIPATH = new File(Util.getWorkingDirectory() + File.separator + "adamhackz"  + File.separator, "scriptname_" + "settings.ini");
-    public static ArrayList<String> tasks = new ArrayList<>();
+    public static final File SETTINGS_PATH = new File(Util.getWorkingDirectory() + File.separator + "adamhackz" + File.separator, "scriptname_" + "settings.ini");
     public final FluffeesPaint FLUFFEES_PAINT = new FluffeesPaint(this, INVENTORY_AREA, new Color[]{new Color(255, 251, 255)}, "Trebuchet MS", new Color[]{new Color(93, 156, 236, 127)},
             new Color[]{new Color(39, 95, 175)}, 1, false, 5, 3, 0);
     /*
@@ -59,7 +57,10 @@ public class ClueHunterCollector extends Script implements Painting, PaintInfo, 
 
     private State scriptState;
     private String args;
-    private boolean continueRunning = true;
+    private final ABCUtil abcInstance = new ABCUtil();
+    private int run_at = abcInstance.generateRunActivation();
+
+    private final int eatAt = abcInstance.generateEatAtHP();
 
     @Override
     public void onPaint(Graphics graphics) {
@@ -78,22 +79,51 @@ public class ClueHunterCollector extends Script implements Painting, PaintInfo, 
         General.println("Argument " + hashMap + "has been successfully passed");
         if (hashMap.containsKey("custom_input")) {
             args = hashMap.get("custom_input");
-            for (String arg : args.split(",")) {
+        } else if (hashMap.containsKey("autostart")) {
+            args = hashMap.get("autostart");
+        }
+        for (String arg : args.split(",")) {
+            if (!args.isEmpty()) {
                 if (arg.contains("outfit")) {
                     tasks.add("cloak");
                     tasks.add("garb");
                     tasks.add("trousers");
                     tasks.add("glovesandboots");
+                    requiredInventorySpace = requiredInventorySpace + 5;
                 }
                 if (arg.contains("helm")) {
                     tasks.add("helm");
+                    requiredInventorySpace = requiredInventorySpace + 4;
                 }
-                if (arg.contains("trousers")){
+                if (arg.contains("trousers")) {
                     tasks.add("trousers");
+                    requiredInventorySpace = requiredInventorySpace + 1;
                 }
+                if (arg.contains("cloak")) {
+                    tasks.add("cloak");
+                    requiredInventorySpace = requiredInventorySpace + 1;
+                }
+                if (arg.contains("garb")) {
+                    tasks.add("garb");
+                    requiredInventorySpace = requiredInventorySpace + 1;
+                }
+                if (arg.contains("glovesandboots")) {
+                    tasks.add("glovesandboots");
+                    requiredInventorySpace = requiredInventorySpace + 2;
+                }
+                if (arg.contains("stamina")) {
+                    usingStamina = true;
+                    requiredInventorySpace = requiredInventorySpace + 1;
+                }
+                if (arg.contains("food")) {
+                    usingFood = true;
+                    foodName = arg.substring(arg.lastIndexOf(":") + 1);
+
+                    foodCount = General.random(4, 10);
+                    requiredInventorySpace = requiredInventorySpace + foodCount;
+                }
+                General.println("We will need " + requiredInventorySpace + " free spaces." + "Tasks: " + tasks.toString());
             }
-        } else if (hashMap.containsKey("autostart")) {
-            args = hashMap.get("autostart");
         }
     }
 
@@ -108,48 +138,44 @@ public class ClueHunterCollector extends Script implements Painting, PaintInfo, 
                 return new DaxCredentials("sub_DPjXXzL5DeSiPf", "PUBLIC-KEY");
             }
         });
+        DaxWalker.setGlobalWalkingCondition(() -> {
+            //check health and eat
+            if (getHpPercent() <= eatAt) {
+                Eat();
+            }
+            runHandler();
+
+            return WalkingCondition.State.CONTINUE_WALKER;
+        });
+
         Mouse.setSpeed(General.random(95, 280));
         if (!inGame()) {
             Timing.waitCondition(() -> inGame(), General.random(2500, 4100));
         } else {
-
             Collections.shuffle(tasks);
             General.println("Current Account: " + Player.getRSPlayer().getName());
 
         }
+
+
         return true;
     }
 
-
     @Override
     public void run() {
-/*
-Loading settings
- */
-        try {
-            Platform.runLater(() -> {
-                guiExample.loadSettings();
-                guiExample.setVisible(true);
-            });
-        } catch (Throwable ignore) {
-            General.println("Failed to load script settings.");
-        }
-        try {
-            fxml = new URL("https://pastebin.com/raw/fk6Y0X1t");
+        if (args.isEmpty()) {
+            try {
+                fxml = new URL("https://raw.githubusercontent.com/not-tivia/TRiBot/master/cluehuntercollector/gui/Cluehunter.fxml");
+            } catch (MalformedURLException e) {
+                e.printStackTrace();
+            }
             gui = new GUI(fxml);
             gui.show();
-        } catch (MalformedURLException e) {
-            e.printStackTrace();
+            while (gui.isOpen()) {
+                sleep(150);
+            }
         }
-
-
-        while (gui.isOpen()) {
-            sleep(150);
-        }
-
-
-
-         if (onStart()) {
+        if (onStart()) {
             while (continueRunning) {
                 loop();
             }
@@ -172,22 +198,24 @@ Loading settings
     public int loop() {
         scriptState = getState();
         General.sleep(50);
-        General.println(scriptState);
+
+
         switch (scriptState) {
             case CHECK_BANK:
                           /*
-                   Deposit all if we are at the bank
-                     */
+                          We need a minimum of 7 spaces for gear if not collecting the helm
+                          11 if we are collecting the helm which includes the required *Nature rune,Leather boots,Superantipoison(1)*
+                          and then we need to account for food if food is selected in the GUI
+                          The reason we do not deposit everything on start all the time,
+                          is to account for people using script queueing and daxwalker jewlery/tab teleports
+                           */
+
                 if (Banking.isInBank() || AREA_GE.contains(Player.getPosition())) {
                     if (Banking.isBankScreenOpen()) {
-                        /*
-                        We need to make space for everything we will potentially need
-                        which includes
-                        A spade, 6 armour pieces, coins,
-                        and if collecting the helm - Nature rune,Leather boots,Superantipoison(1)
-                         */
-                        Banking.depositAll();
-                        Timing.waitCondition(() -> openInventorySpots() == 28, General.random(3000, 6000));
+                        if (openInventorySpots() <= requiredInventorySpace) {
+                            Banking.depositAll();
+                            Timing.waitCondition(() -> openInventorySpots() > requiredInventorySpace, General.random(3000, 6000));
+                        }
 
                         if (!hasItem("Spade")) {
                             if (bankHasItem("Spade")) {
@@ -199,6 +227,7 @@ Loading settings
                             }
                         }
 
+                        // We withdraw coins to be able to take a boat to go to brimhaven or other ships
                         if (!hasItem("Coins") && bankHasItem("Coins")) {
                             if (Banking.withdraw(General.random(5000, 10000), "Coins")) {
                                 Timing.waitCondition(() -> hasItem("Coins"), General.random(3000, 6000));
@@ -246,6 +275,25 @@ Loading settings
                             }
                         }
 
+                        if (usingFood) {
+                            if (!hasItem(foodName) && bankHasItem(foodName)) {
+                                if (Banking.withdraw(foodCount, foodName)) {
+                                    Timing.waitCondition(() -> hasItem(foodName), General.random(3000, 6000));
+                                }
+                            }
+                        }
+                        if (usingStamina) {
+                            if (!hasItemFilter("Stamina")) {
+                                RSItem[] staminaBank = Banking.find("Stamina potion(4)", "Stamina potion(3)", "Stamina potion(2)", "Stamina potion(1)");
+                                if (staminaBank.length > 0 && staminaBank[0] != null) {
+                                    if (Banking.withdraw(1, staminaBank[0].getID())) {
+                                        Timing.waitCondition(() -> hasItemFilter("Stamina potion(4)", "Stamina potion(3)", "Stamina potion(2)", "Stamina potion(1)"), General.random(2400, 5000));
+                                    }
+                                }
+                            }
+                        }
+
+
                         hasCheckedBank = true;
                     } else {
 
@@ -259,6 +307,7 @@ Loading settings
                                 Timing.waitCondition(() -> !Interfaces.isInterfaceSubstantiated(664), General.random(3000, 6000));
                             }
                         }
+
                         if (Banking.openBank()) {
                             Timing.waitCondition(() -> Banking.isBankScreenOpen(), General.random(2500, 4100));
                         }
@@ -275,38 +324,11 @@ Loading settings
                 break;
 
             case COLLECT_SPADE:
-                if (hasItem("Spade")){
+                if (hasItem("Spade")) {
                     needsSpade = false;
                 }
                 if (openInventorySpots() >= 2) {
-                        Interactions.interactWithObject("Take", "Spade", AREA_SPADE);
-                        /*
-                    if (AREA_SPADE.contains(Player.getPosition())) {
-                        RSObject[] obj = Objects.findNearest(20, Filters.Objects.inArea(AREA_SPADE).and(Filters.Objects.nameEquals("Spade").and(Filters.Objects.actionsContains("Take"))));
-                        if (obj.length > 0 && obj[0] != null) {
-                            if (obj[0].isOnScreen() && obj[0].isClickable()) {
-                                if (PathFinding.canReach(obj[0].getPosition(), true)) {
-                                    if (Clicking.click("Take", obj[0])) {
-                                        Timing.waitCondition(() -> hasItem("Spade"), General.random(2300, 3100));
-                                    }
-                                } else {
-                                    if (DaxWalker.walkTo(obj[0].getPosition())) {
-                                        Timing.waitCondition(() -> !Player.isMoving(), General.random(2300, 3100));
-                                    }
-                                }
-                            } else {
-                                if (obj[0].adjustCameraTo()) {
-                                    Timing.waitCondition(() -> !obj[0].isOnScreen() && !obj[0].isClickable(), General.random(2300, 3100));
-                                }
-                            }
-                        }
-                    } else {
-                        if (DaxWalker.walkTo(AREA_SPADE.getRandomTile())) {
-                            Timing.waitCondition(() -> !Player.isMoving(), General.random(600, 1100));
-                        }
-                    }
-
-                         */
+                    Interactions.interactWithObject("Take", "Spade", AREA_SPADE);
                 } else {
                     if (isAtBank()) {
                         if (Banking.isBankScreenOpen()) {
@@ -335,6 +357,11 @@ Loading settings
                     }
                     continueRunning = false;
                 } else {
+                    if (Banking.isBankScreenOpen()){
+                        Banking.close();
+                        Timing.waitCondition(() -> Banking.isBankScreenOpen(), General.random(1200, 2000));
+
+                    }
                     if (tasks.get(0).contains("cloak")) {
                         if (hasItem("Clue hunter cloak")) {
                             tasks.remove(0);
@@ -392,7 +419,7 @@ Loading settings
     private boolean isAtBank() {
         RSObject[] bank = Objects.findNearest(5, "Bank booth", "Bank chest", "Bank Booth");
         RSNPC[] banker = NPCs.findNearest("Banker");
-        return bank.length > 0 || banker.length > 0 ;
+        return bank.length > 0 || banker.length > 0;
     }
 
     private boolean hasItemFilter(String... ItemName) {
@@ -419,10 +446,56 @@ Loading settings
         return 28 - Inventory.getAll().length;
     }
 
+    private void Eat() {
+        if (GameTab.getOpen() != GameTab.TABS.INVENTORY) {
+            GameTab.open(GameTab.TABS.INVENTORY);
+        }
+        RSItem[] food = Inventory.find("Trout");
+        if (food.length > 0) {
+            food[0].click("Eat");
+            General.sleep(500, 1200);
+            General.println("Ate food..");
+        }
+    }
+
+    private int getHpPercent() {
+        return (Skills.getCurrentLevel(Skills.SKILLS.HITPOINTS) * 100) / Skills.getActualLevel(Skills.SKILLS.HITPOINTS);
+    }
+
+
+
 
     public enum State {
         CHECK_BANK, COLLECT_OUTFIT, COLLECT_SPADE
     }
+
+    private void runHandler() {
+        if (!Banking.isBankScreenOpen()) {
+
+            if (hasItemFilter("Stamina potion") && !staminaActive() && Game.getRunEnergy() <= run_at) {
+                RSItem[] stamina = Inventory.find(Filters.Items.nameContains("Stamina potion"));
+                if (stamina.length > 0 && stamina[0] != null) {
+                    if (Clicking.click("Drink", stamina[0])) {
+                        Timing.waitCondition(() -> staminaActive(), General.random(1200, 2000));
+                        General.println("Drank stamina potion");
+                    }
+                }
+            }
+            if (!Game.isRunOn() && Game.getRunEnergy() >= run_at) {
+                if (Options.setRunOn(true)) {
+                    Timing.waitCondition(() -> Options.isRunEnabled(), General.random(600, 1100));
+                    run_at = abcInstance.generateRunActivation();
+                    General.println("Enabled run. Next run at " + run_at);
+                }
+            }
+        }
+    }
+
+    private boolean staminaActive() {
+        return Game.getVarBit(25) == 1;
+    }
+
+
 
 
 }
