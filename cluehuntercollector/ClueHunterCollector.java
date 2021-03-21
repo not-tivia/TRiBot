@@ -37,6 +37,8 @@ import java.util.Collections;
 import java.util.HashMap;
 
 import static scripts.api.FluffeePaint.FluffeesPaint.PaintLocations.INVENTORY_AREA;
+import static scripts.api.bank.bank.bankHasItem;
+import static scripts.api.items.ItemCheck.*;
 import static scripts.cluehuntercollector.data.Constants.AREA_GE;
 import static scripts.cluehuntercollector.data.Constants.AREA_SPADE;
 import static scripts.cluehuntercollector.data.Vars.*;
@@ -46,7 +48,6 @@ import static scripts.cluehuntercollector.data.Vars.*;
 
 public class ClueHunterCollector extends Script implements Painting, PaintInfo, MessageListening07, Arguments {
 
-    public static final File SETTINGS_PATH = new File(Util.getWorkingDirectory() + File.separator + "adamhackz" + File.separator, "scriptname_" + "settings.ini");
     public final FluffeesPaint FLUFFEES_PAINT = new FluffeesPaint(this, INVENTORY_AREA, new Color[]{new Color(255, 251, 255)}, "Trebuchet MS", new Color[]{new Color(93, 156, 236, 127)},
             new Color[]{new Color(39, 95, 175)}, 1, false, 5, 3, 0);
     /*
@@ -286,8 +287,8 @@ public class ClueHunterCollector extends Script implements Painting, PaintInfo, 
                             if (!hasItemFilter("Stamina")) {
                                 RSItem[] staminaBank = Banking.find("Stamina potion(4)", "Stamina potion(3)", "Stamina potion(2)", "Stamina potion(1)");
                                 if (staminaBank.length > 0 && staminaBank[0] != null) {
-                                    if (Banking.withdraw(1, staminaBank[0].getID())) {
-                                        Timing.waitCondition(() -> hasItemFilter("Stamina potion(4)", "Stamina potion(3)", "Stamina potion(2)", "Stamina potion(1)"), General.random(2400, 5000));
+                                    if (Banking.withdraw(General.random(1,4), staminaBank[0].getID())) {
+                                        Timing.waitCondition(() -> hasAnyItem("Stamina potion(4)", "Stamina potion(3)", "Stamina potion(2)", "Stamina potion(1)"), General.random(2400, 5000));
                                     }
                                 }
                             }
@@ -422,25 +423,7 @@ public class ClueHunterCollector extends Script implements Painting, PaintInfo, 
         return bank.length > 0 || banker.length > 0;
     }
 
-    private boolean hasItemFilter(String... ItemName) {
-        RSItem[] items = Inventory.find(Filters.Items.nameContains(ItemName));
-        return items.length > 0 && items[0] != null;
-    }
 
-    private boolean bankHasItemFilter(String... ItemName) {
-        RSItem[] items = Banking.find(Filters.Items.nameContains(ItemName));
-        return items.length > 0 && items[0] != null;
-    }
-
-    private boolean hasItem(String... ItemName) {
-        RSItem[] items = Inventory.find(ItemName);
-        return items.length > 0 && items[0] != null;
-    }
-
-    private boolean bankHasItem(String... ItemName) {
-        RSItem[] items = Banking.find(ItemName);
-        return items.length > 0 && items[0] != null;
-    }
 
     private int openInventorySpots() {
         return 28 - Inventory.getAll().length;

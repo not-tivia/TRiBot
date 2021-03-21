@@ -9,12 +9,12 @@ import org.tribot.api2007.ext.Filters;
 import org.tribot.api2007.types.RSItem;
 import scripts.api.dax_api.api_lib.DaxWalker;
 
+import static scripts.api.items.ItemCheck.hasItem;
+import static scripts.cluehuntercollector.data.Constants.AREA_CLOAK;
 import static scripts.cluehuntercollector.data.Constants.AREA_GLOVES_AND_BOOTS;
 
 public class GlovesAndBoots {
 
-    private static final int TIMEOUT = General.random(5000, 10000);
-    private static long START_TIME = System.currentTimeMillis();
     private boolean continueRunning = true;
 
     private State SCRIPT_STATE = getState();
@@ -23,20 +23,17 @@ public class GlovesAndBoots {
 
 
     private boolean inArea() {
-        return AREA_GLOVES_AND_BOOTS.contains(Player.getPosition());
+        return AREA_GLOVES_AND_BOOTS.equals(Player.getPosition());
     }
 
     private State getState() {
-        if (Banking.isBankScreenOpen()){
-            return State.CLOSE_BANK_FAILSAFE;
-        } else {
 
             if (inArea()) {
                 return State.DIG;
             } else {
                 return State.WALK_TO_AREA;
             }
-        }
+
 
 
     }
@@ -47,31 +44,22 @@ public class GlovesAndBoots {
 
             switch (SCRIPT_STATE) {
 
-                case CLOSE_BANK_FAILSAFE:
-                    Banking.close();
-                    break;
+
 
                 case DIG:
 
                     if (hasItem("Clue hunter gloves") && hasItem("Clue hunter boots")) {
                         continueRunning = false;
                     } else {
-                        if (System.currentTimeMillis() - START_TIME >= TIMEOUT) {
-                            General.println("This is taking a little too long... ");
-                            if (DaxWalker.walkTo(AREA_GLOVES_AND_BOOTS.getRandomTile())) {
-                                Timing.waitCondition(() -> !Player.isMoving(), General.random(600, 1100));
-                                START_TIME = System.currentTimeMillis();
-                            }
-                        } else {
-                            for (int i = 0; i < 1; i++) {
+
                                 RSItem[] spade = Inventory.find("Spade");
                                 if (spade.length > 0 && spade[0] != null) {
                                     if (spade[0].click("Dig")) {
                                         Timing.waitCondition(() -> hasItem("Clue hunter gloves") && hasItem("Clue hunter boots"), General.random(2300, 3100));
                                     }
                                 }
-                            }
-                        }
+
+
                     }
 
 
@@ -79,10 +67,16 @@ public class GlovesAndBoots {
 
 
                 case WALK_TO_AREA:
-                    if (!AREA_GLOVES_AND_BOOTS.contains(Player.getPosition())) {
-                        if (DaxWalker.walkTo(AREA_GLOVES_AND_BOOTS.getRandomTile())) {
-                            Timing.waitCondition(() -> !Player.isMoving(), General.random(600, 1100));
+                    if (!AREA_GLOVES_AND_BOOTS.equals(Player.getPosition())) {
+                        if (AREA_GLOVES_AND_BOOTS.isClickable() && AREA_GLOVES_AND_BOOTS.isOnScreen()) {
+                            Clicking.click("Walk here", AREA_GLOVES_AND_BOOTS.getPosition());
+                            General.sleep(1200, 3000);
+                        } else {
+                            if (DaxWalker.walkTo(AREA_GLOVES_AND_BOOTS)) {
+                                Timing.waitCondition(() -> !Player.isMoving(), General.random(600, 1100));
+                            }
                         }
+
                     }
                     break;
 
@@ -95,23 +89,12 @@ public class GlovesAndBoots {
 
 
 
-    private boolean hasItem(String... ItemName) {
-        RSItem[] items = Inventory.find(ItemName);
-        return items.length > 0 && items[0] != null;
-    }
-
-    private boolean hasItemFilter(String... ItemName) {
-        RSItem[] items = Inventory.find(Filters.Items.nameContains(ItemName));
-        return items.length > 0 && items[0] != null;
-    }
-
 
     public enum State {
-        WALK_TO_AREA, DIG, CLOSE_BANK_FAILSAFE
+        WALK_TO_AREA, DIG,
     }
 
 
-    private final ABCUtil abcInstance = new ABCUtil();
 
 
 

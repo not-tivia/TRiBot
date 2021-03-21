@@ -176,6 +176,8 @@ public class Controller extends AbstractGUIController {
         }
 
         //Food
+
+
         if (foodcheckbox.isSelected()) {
             usingFood = true;
             foodCount = General.random(4, 10);
@@ -225,6 +227,7 @@ public class Controller extends AbstractGUIController {
     public void initialize(URL arg0, ResourceBundle arg1) {
         //ToDo
         foodchoice.setItems(FXCollections.observableArrayList(foodChoiceArray));
+        foodchoice.disableProperty().bind(foodcheckbox.selectedProperty().not());
 
     }
 
