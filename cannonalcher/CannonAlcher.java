@@ -234,7 +234,11 @@ public class CannonAlcher extends Script implements Painting, PaintInfo, Message
                         if (lootlist[0].isClickable() && lootlist[0].isOnScreen()) {
                             int item = lootlist[0].getID();
                             telegrabItem(item);
-                            General.println("Attempting to loot " + lootlist[0].getDefinition().getName());
+                            RSItemDefinition def = lootlist[0].getDefinition();
+                            if (def != null) {
+                                General.println("Attempting to loot " + lootlist[0].getDefinition().getName());
+
+                            }
                         }
                     }
 
@@ -249,12 +253,20 @@ public class CannonAlcher extends Script implements Painting, PaintInfo, Message
                             if (lootlist[0].isClickable() && lootlist[0].isOnScreen()) {
                                 if (Clicking.click("Take", lootlist[0])) {
                                     Timing.waitCondition(() -> !Player.isMoving() || lootlist.length < 1, General.random(2500, 4100));
-                                    General.println("Attempting to loot " + lootlist[0].getDefinition().getName());
+                                    RSItemDefinition def = lootlist[0].getDefinition();
+                                    if (def != null) {
+                                        General.println("Attempting to loot " + lootlist[0].getDefinition().getName());
+
+                                    }
                                 }
                             } else {
                                 if (DaxWalker.walkTo(lootlist[0].getPosition())) {
                                     Timing.waitCondition(() -> !Player.isMoving(), General.random(2500, 4100));
-                                    General.println("walking to loot " + lootlist[0].getDefinition().getName());
+                                    RSItemDefinition def = lootlist[0].getDefinition();
+                                    if (def != null) {
+                                        General.println("Attempting to loot " + lootlist[0].getDefinition().getName());
+
+                                    }
                                 }
                             }
 
@@ -276,10 +288,12 @@ public class CannonAlcher extends Script implements Painting, PaintInfo, Message
                 RSItem[] alchable = Inventory.find(alchName);
                 if (alchable.length > 0 && alchable[0] != null) {
                     int alchID = alchable[0].getID();
-
-                    if (!alchable[0].getDefinition().isNoted()) {
-                        alchID = alchable[0].getID() + 1;
-                        //Here we add +1 to the item ID so we alch the noted version
+                    RSItemDefinition def = alchable[0].getDefinition();
+                    if (def != null) {
+                        if (!def.isNoted()) {
+                            alchID = alchable[0].getID() + 1;
+                            //Here we add +1 to the item ID so we alch the noted version
+                        }
                     }
                     if (alchable[0].getIndex() == 11) {
                         highAlch(alchID);
@@ -399,6 +413,7 @@ public class CannonAlcher extends Script implements Painting, PaintInfo, Message
                                     }
                                 }
                             } else {
+
                                 cannon[0].adjustCameraTo();
                                 Timing.waitCondition(() -> cannon[0].isClickable(), General.random(2500, 4100));
                             }
