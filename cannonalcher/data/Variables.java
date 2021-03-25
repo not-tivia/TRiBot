@@ -1,5 +1,6 @@
 package scripts.cannonalcher.data;
 
+import org.tribot.api.General;
 import org.tribot.api2007.types.RSArea;
 import org.tribot.api2007.types.RSItem;
 import org.tribot.api2007.types.RSTile;
@@ -7,8 +8,7 @@ import scripts.cannonClicker.Data.Constants;
 
 public class Variables {
 
-    public static RSTile customCannonTile = null;
-    public static RSTile customSafeTile = null;
+
 
     public static String alchName;
     public static String cannonballName;
@@ -26,8 +26,8 @@ public class Variables {
 
     public static boolean reloadEnabled = false;
 
-    public static long LAST_LOAD;
-    public static int NEXT_LOAD;
+    public static long LAST_LOAD = System.currentTimeMillis();
+    public static int NEXT_LOAD = General.random(7000, 36000);
 
 
 

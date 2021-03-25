@@ -14,25 +14,19 @@ public class Constants {
     public enum Locations {
 
 
-        CASTLE_WARS("Castle wars ogres", new RSArea(
-                new RSTile[] {
-                        new RSTile(1657, 10089, 0),
-                        new RSTile(1653, 10080, 0),
-                        new RSTile(1673, 10081, 0),
-                        new RSTile(1667, 10086, 0),
-                        new RSTile(1667, 10094, 0),
-                        new RSTile(1661, 10093, 0)
-                })),
-        COMBAT_TRAINING_AREA("Combat training area", new RSArea(new RSTile(2524, 3371, 0), new RSTile(2532, 3370, 0)));
+        CASTLE_WARS("Castle wars ogres", new RSArea(new RSTile(2494, 3099, 0), new RSTile(2492, 3097, 0)), new RSTile(2493,3098)),
+        COMBAT_TRAINING_AREA("Combat training area", new RSArea(new RSTile(2529, 3370, 0), new RSTile(2527, 3372, 0)), new RSTile(2528,3371,0));
 
         final String areaName;
         final RSArea areaLocation;
+        final RSTile middleTile;
 
         static final Locations[] locations = {CASTLE_WARS, COMBAT_TRAINING_AREA};
 
-        Locations(String areaName, RSArea areaLocation) {
+        Locations(String areaName, RSArea areaLocation, RSTile middleTile) {
             this.areaName = areaName;
             this.areaLocation = areaLocation;
+            this.middleTile = middleTile;
         }
 
         public String getName() {
@@ -42,6 +36,8 @@ public class Constants {
         public RSArea getArea() {
             return areaLocation;
         }
+
+        public RSTile getMiddleTile() { return middleTile; }
 
     }
 

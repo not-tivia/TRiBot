@@ -1,7 +1,7 @@
 package scripts.cannonalcher.gui;
 
 public class GUISettings {
-
+/*
     private boolean helm;
     private boolean bootsandgloves;
     private boolean garb;
@@ -76,4 +76,6 @@ public class GUISettings {
     public void setGarb(boolean garb) {
         this.garb = garb;
     }
+
+ */
 }

@@ -4,13 +4,12 @@ import com.allatori.annotations.DoNotRename;
 import com.google.gson.Gson;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
-import javafx.scene.control.Button;
-import javafx.scene.control.CheckBox;
-import javafx.scene.control.ChoiceBox;
-import javafx.scene.control.MenuItem;
+import javafx.scene.control.*;
 import org.tribot.api.General;
 import org.tribot.api2007.Login;
 import org.tribot.api2007.Player;
+import org.tribot.api2007.types.RSArea;
+import org.tribot.api2007.types.RSTile;
 import org.tribot.util.Util;
 import scripts.cannonClicker.Data.Vars;
 import scripts.cannonalcher.data.Constants;
@@ -30,7 +29,6 @@ import static scripts.cannonalcher.data.Variables.*;
 @DoNotRename
 public class Controller extends AbstractGUIController {
 
-    private final File directory = new File(Util.getWorkingDirectory() + File.separator + "adamhackz" + File.separator + "cluehuntercollector" + File.separator + "saves");
 
 
     @Override
@@ -68,6 +66,10 @@ public class Controller extends AbstractGUIController {
     @DoNotRename
     private CheckBox lootItemsCheckBox;
 
+    @FXML
+    @DoNotRename
+    private TextField alchItemTextField;
+
 
     @FXML @DoNotRename
     private CheckBox castAlchCheckBox;
@@ -78,6 +80,19 @@ public class Controller extends AbstractGUIController {
     //Both Start script buttons are just copy and pasted clones of eachother
     @FXML @DoNotRename
     public void startScriptPressed(){
+        if (presetLocationChoiceBox.getValue().equals(Constants.Locations.CASTLE_WARS)){
+            cannonArea = Constants.Locations.CASTLE_WARS.getArea();
+            cannonTile = Constants.Locations.CASTLE_WARS.getMiddleTile();
+        } else {
+            if (presetLocationChoiceBox.getValue().equals(Constants.Locations.COMBAT_TRAINING_AREA)){
+                cannonArea = Constants.Locations.COMBAT_TRAINING_AREA.getArea();
+                cannonTile = Constants.Locations.COMBAT_TRAINING_AREA.getMiddleTile();
+            }
+        }
+        if (castAlchCheckBox.isSelected()){
+            alchName = (alchItemTextField.getText());
+        }
+
         if (useGraniteBallsCheckBox.isSelected()){
             cannonballName = "Granite cannonball";
         } else {
@@ -103,6 +118,19 @@ public class Controller extends AbstractGUIController {
 
     @FXML @DoNotRename
     public void startScriptTwoPressed(){
+        if (presetLocationChoiceBox.getValue().equals(Constants.Locations.CASTLE_WARS)){
+            cannonArea = Constants.Locations.CASTLE_WARS.getArea();
+            cannonTile = Constants.Locations.CASTLE_WARS.getMiddleTile();
+        } else {
+            if (presetLocationChoiceBox.getValue().equals(Constants.Locations.COMBAT_TRAINING_AREA)){
+                cannonArea = Constants.Locations.COMBAT_TRAINING_AREA.getArea();
+                cannonTile = Constants.Locations.COMBAT_TRAINING_AREA.getMiddleTile();
+            }
+        }
+        if (castAlchCheckBox.isSelected()){
+            alchName = (alchItemTextField.getText());
+        }
+
         if (useGraniteBallsCheckBox.isSelected()){
             cannonballName = "Granite cannonball";
         } else {
@@ -133,7 +161,8 @@ public class Controller extends AbstractGUIController {
     public void setCustomCannonPressed(){
         if (inGame()){
             if (Player.getRSPlayer()!=null && Player.getPosition()!=null) {
-                customCannonTile = Player.getPosition();
+                cannonArea = new RSArea(new RSTile(Vars.get().CANNON_TILE.getX() + 1, Vars.get().CANNON_TILE.getY() - 1), new RSTile(Vars.get().CANNON_TILE.getX() - 1, Vars.get().CANNON_TILE.getY() + 1));;
+                cannonTile = Player.getPosition();
             }
         } else {
             General.println("We need to be logged in to set a custom tile.");
@@ -144,65 +173,14 @@ public class Controller extends AbstractGUIController {
     public void setCustomSafePressed(){
         if (inGame()){
             if (Player.getRSPlayer()!=null && Player.getPosition()!=null) {
-                customSafeTile = Player.getPosition();
+                cannonArea = new RSArea(new RSTile(Vars.get().CANNON_TILE.getX() + 1, Vars.get().CANNON_TILE.getY() - 1), new RSTile(Vars.get().CANNON_TILE.getX() - 1, Vars.get().CANNON_TILE.getY() + 1));;
+                cannonTile = Player.getPosition();
             }
         } else {
             General.println("We need to be logged in to set a custom tile.");
         }
     }
 
-
-    private GUISettings settings = new GUISettings();
-
-
-
-    @FXML
-    @DoNotRename
-    public void menuopenpressed() {
-        //String saveFilePath = directory + File.separator + "last.json";
-        if (directory.exists()) {
-            General.println("Opening our last save from: " + directory);
-            try {
-                // Read the settings
-                String s = readString(new File(directory, "last.json").toPath());
-                settings = new Gson().fromJson(s, GUISettings.class);
-                // Gear
-
-
-                if (settings.isFood()) {
-
-
-                    //foodchoice.setItems( settings.getFoodName((String) foodchoice.getValue()));
-
-                } else {
-
-                }
-
-
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-
-
-    }
-
-    @FXML
-    @DoNotRename
-    public void menusavepressed() {
-        if (!directory.exists())
-            directory.mkdirs();
-        try {
-
-            // Write the settings
-            String s = new Gson().toJson(settings);
-            writeString(new File(directory, "last.json").toPath(), s);
-            General.println("Settings saved successfully to: " + directory);
-        } catch (IOException e) {
-            General.println("Error attempting to save settings.");
-            e.printStackTrace();
-        }
-    }
 
 
 
