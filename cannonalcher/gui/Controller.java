@@ -11,7 +11,7 @@ import org.tribot.api2007.Player;
 import org.tribot.api2007.types.RSArea;
 import org.tribot.api2007.types.RSTile;
 import org.tribot.util.Util;
-import scripts.cannonClicker.Data.Vars;
+
 import scripts.cannonalcher.data.Constants;
 import scripts.cannonalcher.data.Variables;
 
@@ -161,8 +161,9 @@ public class Controller extends AbstractGUIController {
     public void setCustomCannonPressed(){
         if (inGame()){
             if (Player.getRSPlayer()!=null && Player.getPosition()!=null) {
-                cannonArea = new RSArea(new RSTile(Vars.get().CANNON_TILE.getX() + 1, Vars.get().CANNON_TILE.getY() - 1), new RSTile(Vars.get().CANNON_TILE.getX() - 1, Vars.get().CANNON_TILE.getY() + 1));;
                 cannonTile = Player.getPosition();
+                cannonArea = new RSArea(new RSTile(cannonTile.getX() + 1, cannonTile.getY() - 1), new RSTile(cannonTile.getX() - 1, cannonTile.getY() + 1));;
+
             }
         } else {
             General.println("We need to be logged in to set a custom tile.");
@@ -173,8 +174,9 @@ public class Controller extends AbstractGUIController {
     public void setCustomSafePressed(){
         if (inGame()){
             if (Player.getRSPlayer()!=null && Player.getPosition()!=null) {
-                cannonArea = new RSArea(new RSTile(Vars.get().CANNON_TILE.getX() + 1, Vars.get().CANNON_TILE.getY() - 1), new RSTile(Vars.get().CANNON_TILE.getX() - 1, Vars.get().CANNON_TILE.getY() + 1));;
                 cannonTile = Player.getPosition();
+                cannonArea = new RSArea(new RSTile(cannonTile.getX() + 1, cannonTile.getY() - 1), new RSTile(cannonTile.getX() - 1, cannonTile.getY() + 1));;
+
             }
         } else {
             General.println("We need to be logged in to set a custom tile.");

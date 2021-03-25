@@ -20,7 +20,7 @@ import scripts.api.dax_api.api_lib.DaxWalker;
 import scripts.api.dax_api.api_lib.models.DaxCredentials;
 import scripts.api.dax_api.api_lib.models.DaxCredentialsProvider;
 import scripts.api.dax_api.walker_engine.WalkingCondition;
-import scripts.cannonClicker.Data.Vars;
+
 import scripts.cannonalcher.gui.GUI;
 
 import java.awt.*;
@@ -109,7 +109,7 @@ public class CannonAlcher extends Script implements Painting, PaintInfo, Message
     }
 
     private boolean needsToRepair() {
-        RSObject[] brokenCannon = Objects.findNearest(25, Filters.Objects.nameEquals("Broken multicannon").and(Filters.Objects.tileEquals(cannonTile)));
+        RSObject[] brokenCannon = Objects.findNearest(25, Filters.Objects.nameEquals("Broken multicannon").and(Filters.Objects.inArea(cannonArea)));
         return brokenCannon.length > 0;
     }
 
@@ -298,7 +298,7 @@ public class CannonAlcher extends Script implements Painting, PaintInfo, Message
             case REPAIR_CANNON:
                 //we set the range to max range in case we are looting and the cannon breaks while we're far away from it :laugh:
                 clickingFailsafe();
-                RSObject[] brokenCannon = Objects.findNearest(25, Filters.Objects.nameEquals("Broken multicannon").and(Filters.Objects.tileEquals(cannonTile)));
+                RSObject[] brokenCannon = Objects.findNearest(25, Filters.Objects.nameEquals("Broken multicannon").and(Filters.Objects.inArea(cannonArea)));
                 if (brokenCannon.length > 0) {
                     General.println("Broken cannon detected");
                     if (Clicking.click("Repair", brokenCannon[0])) {
@@ -379,7 +379,7 @@ public class CannonAlcher extends Script implements Painting, PaintInfo, Message
 
             case RELOAD_CANNON:
                     clickingFailsafe();
-                    RSObject[] cannon = Objects.findNearest(25, Filters.Objects.nameContains("cannon"));
+                    RSObject[] cannon = Objects.findNearest(25, Filters.Objects.nameContains("cannon").and(Filters.Objects.inArea(cannonArea)));
                     if (cannon.length > 0 && cannon[0] != null) {
                         RSItem[] cannonballs = Inventory.find(cannonballName);
                         if (cannonballs.length > 0) {
@@ -406,7 +406,7 @@ public class CannonAlcher extends Script implements Painting, PaintInfo, Message
                             General.println("We ran out of balls to shove in our tinsy winsy wittle cannon");
                             if (Clicking.click("Pick-up", cannon)) {
                                 Timing.waitCondition(() -> cannon == null, General.random(2500, 4100));
-                                Vars.get().continueRunning = false;
+                                continueRunning = false;
                             }
                         }
                     }

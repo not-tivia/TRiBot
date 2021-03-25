@@ -2,9 +2,9 @@ package scripts.cannonalcher.data;
 
 import org.tribot.api.General;
 import org.tribot.api2007.types.RSArea;
-import org.tribot.api2007.types.RSItem;
+
 import org.tribot.api2007.types.RSTile;
-import scripts.cannonClicker.Data.Constants;
+
 
 public class Variables {
 
