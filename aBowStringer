@@ -1,33 +1,34 @@
 package scripts.aBowStringer;
 
-
 import org.tribot.api.Clicking;
-
 import org.tribot.api.General;
 import org.tribot.api.Timing;
-
 import org.tribot.api.input.Mouse;
-
 import org.tribot.api.util.abc.ABCUtil;
 import org.tribot.api2007.*;
+import org.tribot.api2007.types.RSInterface;
 
-import org.tribot.api2007.types.*;
+import org.tribot.api2007.types.RSObject;
+import org.tribot.api2007.types.RSTile;
 import org.tribot.script.Script;
 import org.tribot.script.ScriptManifest;
 import org.tribot.script.interfaces.Arguments;
 import org.tribot.script.interfaces.Painting;
-
-import scripts.aBowStringer.other_api.entityselector.Entities;
-import scripts.aBowStringer.other_api.entityselector.finders.prefabs.InterfaceEntity;
-import scripts.aBowStringer.other_api.entityselector.finders.prefabs.ObjectEntity;
-import scripts.dax_api.api_lib.DaxWalker;
-import scripts.dax_api.api_lib.models.DaxCredentials;
-import scripts.dax_api.api_lib.models.DaxCredentialsProvider;
-import scripts.dax_api.api_lib.models.RunescapeBank;
+import scripts.api.entityselector.Entities;
+import scripts.api.entityselector.finders.prefabs.InterfaceEntity;
+import scripts.api.entityselector.finders.prefabs.ObjectEntity;
+import scripts.api.dax_api.api_lib.DaxWalker;
+import scripts.api.dax_api.api_lib.models.DaxCredentials;
+import scripts.api.dax_api.api_lib.models.DaxCredentialsProvider;
+import scripts.api.dax_api.api_lib.models.RunescapeBank;
+import scripts.api.util.ClientUtilities;
 
 import java.awt.*;
 import java.text.NumberFormat;
 import java.util.HashMap;
+
+import static scripts.api.items.ItemCheck.bankHasItem;
+import static scripts.api.items.ItemCheck.hasItem;
 
 
 @ScriptManifest(authors = { "adamhackz" }, category = "Crafting", name = "aBowStringer", description = "Simple bowstringer" , version = (1) )
@@ -68,8 +69,10 @@ public class Main extends Script implements Painting, Arguments {
     }
 
     private boolean onStart(){
+      
             daxStart();
-        return true;
+            ClientUtilities.minimizeClient();
+            return true;
     }
 
     @Override
@@ -94,7 +97,6 @@ public class Main extends Script implements Painting, Arguments {
         g.drawString("Resource " + currentResource, 5, 120);
         g.drawString("Finished product " + currentFinishedItem, 5, 140);
         g.drawString("Bowstrings made: " + BowStrings + " (" + BowStringsPerHour + "/h)", 5, 160);
-
         g.drawString("Run %" + run_at, 5, 180);
 
     }
@@ -104,7 +106,7 @@ public class Main extends Script implements Painting, Arguments {
 
     private int run_at = abcInstance.generateRunActivation();
 
-    private void runCheck(){
+      private void runCheck(){
         if (!Game.isRunOn() && Game.getRunEnergy() >= run_at) {
             if (Options.setRunOn(true)){
                 Timing.waitCondition(() -> Options.isRunEnabled(), General.random(600, 1100));
@@ -112,6 +114,8 @@ public class Main extends Script implements Painting, Arguments {
             }
         }
     }
+
+
 
     private int loop() {
         scriptState = getState();
@@ -127,7 +131,7 @@ public class Main extends Script implements Painting, Arguments {
 
                             }
                         } else {
-                            General.println("Out of shit");
+                            General.println("We are out of :" + currentResource);
                             continueRunning = false;
                         }
                     } else {
@@ -181,11 +185,18 @@ public class Main extends Script implements Painting, Arguments {
             case WALK_TO_WHEEL:
                 runCheck();
                 if (SPINNER_TILE.isOnScreen() && SPINNER_TILE.isClickable()){
-                    if (!Player.isMoving() || Player.getPosition().equals(SPINNER_TILE)) {
-                        if (Walking.clickTileMS(SPINNER_TILE, "Walk here")) {
-                            Timing.waitCondition(() -> !Player.isMoving(), General.random(1100, 2400));
+                    if (!Player.isMoving()){
+                        if (PathFinding.canReach(SPINNER_TILE, false)){
+                            if (Walking.clickTileMS(SPINNER_TILE, "Walk here")) {
+                                Timing.waitCondition(() -> !Player.isMoving(), General.random(1100, 2400));
+                            }
+                        } else {
+                            if (DaxWalker.walkTo(SPINNER_TILE.getPosition())){
+                                Timing.waitCondition(() -> !Player.isMoving(), General.random(600, 1100));
+                            }
                         }
                     }
+                    //Player.getPosition().equals(SPINNER_TILE)
                 } else {
                     if (DaxWalker.walkTo(SPINNER_TILE.getPosition())){
                         Timing.waitCondition(() -> !Player.isMoving(), General.random(600, 1100));
@@ -212,7 +223,6 @@ public class Main extends Script implements Painting, Arguments {
                 .actionsEquals("Spin")
                 .sortByDistance()
                 .getFirstResult();
-
 
         if (Skills.getCurrentLevel(Skills.SKILLS.CRAFTING) < CraftingItem.BOWSTRING.requiredLevel) {
             currentResource = CraftingItem.BALLOFWOOL.resourceName;
@@ -315,15 +325,6 @@ public class Main extends Script implements Painting, Arguments {
 
         }
 
-        private boolean hasItem (String...ItemName){
-            RSItem[] items = Inventory.find(ItemName);
-            return items.length > 0 && items[0]!=null;
-        }
-
-        private boolean bankHasItem (String...ItemName){
-            RSItem[] items = Banking.find(ItemName);
-            return items.length > 0 && items[0]!=null;
-        }
 
         private boolean isAtBank () {
             RSObject[] bank = Objects.findNearest(10, "Bank booth", "Bank chest", "Banker");
