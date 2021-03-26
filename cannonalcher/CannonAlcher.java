@@ -88,7 +88,7 @@ public class CannonAlcher extends Script implements Painting, PaintInfo, Message
     }
 
     private boolean inArea() {
-        if (cannonArea == null || cannonTile == null || Player.getRSPlayer() == null || Player.getPosition() == null) {
+        if (Player.getRSPlayer() == null || Player.getPosition() == null) {
             return false;
         }
         return cannonArea.contains(Player.getRSPlayer().getPosition());
