@@ -89,6 +89,10 @@ public class Controller extends AbstractGUIController {
                 cannonTile = Constants.Locations.COMBAT_TRAINING_AREA.getMiddleTile();
             }
         }
+        if (cannonTile==null || cannonArea==null){
+            General.println("You need to set a location");
+            continueRunning = false;
+        }
         if (castAlchCheckBox.isSelected()){
             alchName = (alchItemTextField.getText());
         }
