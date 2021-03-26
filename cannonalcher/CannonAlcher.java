@@ -83,7 +83,7 @@ public class CannonAlcher extends Script implements Painting, PaintInfo, Message
         //Might want to change this to loop through the lootlist and then
         // check if we can reach each one for occasions when more than one loot item is on the floor
         //Removed the reaching check so we can use this method for telegrabbing
-        RSGroundItem[] lootlist = GroundItems.findNearest("Torstal seed", "Snapdragon seed", "Ranarr seed", "Long bone", "Curved bone");
+        RSGroundItem[] lootlist = GroundItems.findNearest("Torstol seed", "Snapdragon seed", "Ranarr seed", "Long bone", "Curved bone");
         return lootlist.length > 0;
     }
 
@@ -224,7 +224,7 @@ public class CannonAlcher extends Script implements Painting, PaintInfo, Message
 
             case LOOTING:
 
-                RSGroundItem[] lootlist = GroundItems.findNearest("Torstal seed", "Snapdragon seed", "Ranarr seed", "Long bone", "Curved bone");
+                RSGroundItem[] lootlist = GroundItems.findNearest("Torstol seed", "Snapdragon seed", "Ranarr seed", "Long bone", "Curved bone");
 
                 if (telegrabbingLoot) {
                     if (!hasItem("Nature rune") || !hasItem("Air rune") || Inventory.isFull()) {
