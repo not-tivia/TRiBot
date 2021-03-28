@@ -433,7 +433,7 @@ public class ClueHunterCollector extends Script implements Painting, PaintInfo, 
         if (GameTab.getOpen() != GameTab.TABS.INVENTORY) {
             GameTab.open(GameTab.TABS.INVENTORY);
         }
-        RSItem[] food = Inventory.find("Trout");
+        RSItem[] food = Inventory.find(foodName);
         if (food.length > 0) {
             food[0].click("Eat");
             General.sleep(500, 1200);
