@@ -149,7 +149,7 @@ public class ClueHunterCollector extends Script implements Painting, PaintInfo, 
             return WalkingCondition.State.CONTINUE_WALKER;
         });
 
-        Mouse.setSpeed(General.random(95, 280));
+        Mouse.setSpeed(General.random(110, 165));
         if (!inGame()) {
             Timing.waitCondition(() -> inGame(), General.random(2500, 4100));
         } else {
