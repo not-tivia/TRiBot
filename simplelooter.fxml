@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!--
+  Copyright (c) 2015, 2019, Gluon and/or its affiliates.
+  All rights reserved. Use is subject to license terms.
+
+  This file is available and licensed under the following license:
+
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions
+  are met:
+
+  - Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+  - Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in
+    the documentation and/or other materials provided with the distribution.
+  - Neither the name of Oracle Corporation nor the names of its
+    contributors may be used to endorse or promote products derived
+    from this software without specific prior written permission.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+  OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+  LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+  DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-->
+
+<?import com.jfoenix.controls.JFXCheckBox?>
+<?import com.jfoenix.controls.JFXToggleButton?>
+<?import javafx.scene.control.Accordion?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.CheckBox?>
+<?import javafx.scene.control.ChoiceBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Menu?>
+<?import javafx.scene.control.MenuBar?>
+<?import javafx.scene.control.MenuItem?>
+<?import javafx.scene.control.SeparatorMenuItem?>
+<?import javafx.scene.control.Spinner?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.TitledPane?>
+<?import javafx.scene.layout.AnchorPane?>
+<?import javafx.scene.layout.ColumnConstraints?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.RowConstraints?>
+<?import javafx.scene.layout.VBox?>
+
+<VBox prefHeight="400.0" prefWidth="640.0" xmlns="http://javafx.com/javafx/15.0.1" xmlns:fx="http://javafx.com/fxml/1" fx:controller="scripts.aLooter.gui.Controller">
+  <children>
+    <MenuBar prefHeight="25.0" prefWidth="627.0" VBox.vgrow="NEVER">
+      <menus>
+        <Menu mnemonicParsing="false" text="File">
+          <items>
+            <MenuItem fx:id="MenuLoad" mnemonicParsing="false" text="Load" />
+            <SeparatorMenuItem mnemonicParsing="false" />
+            <MenuItem fx:id="MenuSave" mnemonicParsing="false" text="Save" />
+            <SeparatorMenuItem mnemonicParsing="false" />
+            <MenuItem fx:id="MenuQuit" mnemonicParsing="false" text="Quit" />
+          </items>
+        </Menu>
+        <Menu mnemonicParsing="false" text="Help">
+          <items>
+            <MenuItem mnemonicParsing="false" text="TRiBot Thread" />
+          </items>
+        </Menu>
+      </menus>
+    </MenuBar>
+    <AnchorPane maxHeight="-1.0" maxWidth="-1.0" prefHeight="271.0" prefWidth="484.0" VBox.vgrow="ALWAYS">
+         <children>
+            <Accordion prefHeight="375.0" prefWidth="640.0">
+              <panes>
+                <TitledPane animated="false" prefHeight="346.0" prefWidth="640.0" text="Main settings">
+                  <content>
+                    <AnchorPane minHeight="0.0" minWidth="0.0" prefHeight="299.0" prefWidth="646.0">
+                           <children>
+                              <JFXToggleButton fx:id="LootItemToggleButton" layoutX="13.0" layoutY="3.0" text="Loot every item over" />
+                              <Spinner fx:id="LootItemSpinner" layoutX="211.0" layoutY="19.0" prefHeight="25.0" prefWidth="104.0" />
+                              <TextField fx:id="LootItemTextField" layoutX="211.0" layoutY="49.0" prefHeight="25.0" prefWidth="104.0" />
+                              <JFXToggleButton fx:id="ActiveRoamToggleButton" layoutX="14.0" layoutY="121.0" text="Actively roam the area" />
+                              <JFXToggleButton fx:id="ReturnToIdleToggleButton" layoutX="13.0" layoutY="192.0" text="Return to idle area " />
+                              <JFXCheckBox fx:id="CustomRoamTimeCheckBox" layoutX="28.0" layoutY="170.0" text="Custom roam timer (secs)" />
+                              <Spinner fx:id="CustomRoamTimeSpinner" layoutX="211.0" layoutY="167.0" prefHeight="25.0" prefWidth="101.0" />
+                              <JFXCheckBox fx:id="EmergencyTeleportCheckBox" layoutX="28.0" layoutY="267.0" text="Emegency teleport if we cannot reach our waiting tile" />
+                              <JFXCheckBox fx:id="CustomIdleAreaTimerCheckBox" layoutX="28.0" layoutY="240.0" text="Custom idle area timer" />
+                              <Spinner fx:id="CustomIdleAreaTimerSpinner" layoutX="211.0" layoutY="237.0" prefHeight="25.0" prefWidth="102.0" />
+                              <Button fx:id="StartScriptButton" layoutX="413.0" layoutY="116.0" mnemonicParsing="false" onAction="#startScriptButtonPressed" prefHeight="69.0" prefWidth="149.0" text="Start script" />
+                              <GridPane layoutX="29.0" layoutY="49.0" prefHeight="70.0" prefWidth="337.0">
+                                <columnConstraints>
+                                  <ColumnConstraints hgrow="SOMETIMES" maxWidth="324.0" minWidth="10.0" prefWidth="324.0" />
+                                  <ColumnConstraints hgrow="SOMETIMES" maxWidth="258.0" minWidth="10.0" prefWidth="19.0" />
+                                </columnConstraints>
+                                <rowConstraints>
+                                  <RowConstraints minHeight="10.0" prefHeight="30.0" vgrow="SOMETIMES" />
+                                  <RowConstraints minHeight="10.0" prefHeight="30.0" vgrow="SOMETIMES" />
+                                  <RowConstraints minHeight="10.0" prefHeight="30.0" vgrow="SOMETIMES" />
+                                </rowConstraints>
+                                 <children>
+                                    <JFXCheckBox fx:id="LootItemCheckBox" prefHeight="27.0" prefWidth="178.0" text="Only loot specific item name" />
+                                    <JFXCheckBox fx:id="SpamClickCheckBox" text="Spam click mode (when competing with other players)" GridPane.rowIndex="1" />
+                                    <JFXCheckBox fx:id="BankOverValueCheckBox" prefHeight="0.0" prefWidth="93.0" text="Bank if we have over X value" GridPane.rowIndex="2" />
+                                 </children>
+                              </GridPane>
+                           </children>
+                        </AnchorPane>
+                  </content>
+                </TitledPane>
+                <TitledPane animated="false" text="Location settings">
+                  <content>
+                    <AnchorPane minHeight="0.0" minWidth="0.0" prefHeight="180.0" prefWidth="200.0">
+                           <children>
+                              <ChoiceBox fx:id="locationChoiceBox" layoutX="244.0" layoutY="43.0" prefWidth="150.0" />
+                              <Label layoutX="249.0" layoutY="20.0" text="Preset and saved locations" />
+                              <Spinner fx:id="CustomLootingRadiusSpinner" layoutX="95.0" layoutY="124.0" prefHeight="25.0" prefWidth="149.0" />
+                              <Spinner fx:id="CustomIdleRadiusSpinner" layoutX="394.0" layoutY="124.0" />
+                              <Label layoutX="111.0" layoutY="97.0" text="Custom looting radius" />
+                              <Label layoutX="415.0" layoutY="97.0" text="Custom idle radius" />
+                              <Button fx:id="SetIdleAreaButton" layoutX="428.0" layoutY="178.0" mnemonicParsing="false" onAction="#setIdleAreaPressed" text="Set idle area" />
+                              <Button fx:id="SetLootingAreaButton" layoutX="120.0" layoutY="178.0" mnemonicParsing="false" onAction="#setLootingAreaPressed" text="Set looting area" />
+                           </children>
+                        </AnchorPane>
+                  </content>
+                </TitledPane>
+                <TitledPane animated="false" prefHeight="368.0" prefWidth="634.0" text="Combat and Idle settings">
+                  <content>
+                    <AnchorPane minHeight="0.0" minWidth="0.0" prefHeight="180.0" prefWidth="200.0">
+                           <children>
+                              <GridPane layoutX="35.0" layoutY="29.0" prefHeight="164.0" prefWidth="531.0">
+                                <columnConstraints>
+                                  <ColumnConstraints hgrow="SOMETIMES" maxWidth="390.0" minWidth="10.0" prefWidth="283.0" />
+                                  <ColumnConstraints hgrow="SOMETIMES" maxWidth="240.0" minWidth="0.0" prefWidth="101.0" />
+                                    <ColumnConstraints hgrow="SOMETIMES" maxWidth="240.0" minWidth="10.0" prefWidth="150.0" />
+                                </columnConstraints>
+                                <rowConstraints>
+                                  <RowConstraints minHeight="10.0" prefHeight="30.0" vgrow="SOMETIMES" />
+                                  <RowConstraints minHeight="10.0" prefHeight="30.0" vgrow="SOMETIMES" />
+                                  <RowConstraints minHeight="10.0" prefHeight="30.0" vgrow="SOMETIMES" />
+                                    <RowConstraints minHeight="10.0" prefHeight="30.0" vgrow="SOMETIMES" />
+                                    <RowConstraints minHeight="10.0" prefHeight="30.0" vgrow="SOMETIMES" />
+                                    <RowConstraints minHeight="10.0" prefHeight="30.0" vgrow="SOMETIMES" />
+                                    <RowConstraints minHeight="10.0" prefHeight="30.0" vgrow="SOMETIMES" />
+                                </rowConstraints>
+                                 <children>
+                                    <CheckBox fx:id="RequireExactCheckBox" mnemonicParsing="false" prefHeight="17.0" prefWidth="334.0" text="Require exact inventory and gear we start with" />
+                                    <CheckBox fx:id="AttackNPCCheckBox" mnemonicParsing="false" text="Attack npcs that attack us" GridPane.rowIndex="1" />
+                                    <CheckBox fx:id="TeleportCheckBox" mnemonicParsing="false" text="Teleport if we are under attack" GridPane.rowIndex="5" />
+                                    <CheckBox fx:id="UseFoodCheckBox" mnemonicParsing="false" text="Use food/Jugs of wine" GridPane.rowIndex="2" />
+                                    <CheckBox fx:id="WorldHopCheckBox" mnemonicParsing="false" text="Worldhop while waiting for respawn" GridPane.rowIndex="4" />
+                                    <CheckBox fx:id="StopOnDeathCheckBox" mnemonicParsing="false" text="Stop script if we die" GridPane.rowIndex="6" />
+                                    <CheckBox fx:id="ItemIsObjectCheckBox" mnemonicParsing="false" text="Item is an object" GridPane.rowIndex="3" />
+                                 </children>
+                              </GridPane>
+                           </children></AnchorPane>
+                  </content>
+                </TitledPane>
+              </panes>
+            </Accordion>
+         </children>
+    </AnchorPane>
+  </children>
+</VBox>
