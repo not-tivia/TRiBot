@@ -81,7 +81,7 @@
                     <AnchorPane minHeight="0.0" minWidth="0.0" prefHeight="299.0" prefWidth="646.0">
                            <children>
                               <JFXToggleButton fx:id="LootItemToggleButton" layoutX="13.0" layoutY="3.0" text="Loot every item over" />
-                              <Spinner fx:id="LootItemSpinner"  min="0" max="1000000" initialValue="100"  editable="true" > layoutX="211.0" layoutY="19.0" prefHeight="25.0" prefWidth="104.0" />
+                              <Spinner fx:id="LootItemSpinner"  min="0" max="1000000" initialValue="100"  editable="true" layoutX="211.0" layoutY="19.0" prefHeight="25.0" prefWidth="104.0" />
 		
                               <TextField fx:id="LootItemTextField" layoutX="211.0" layoutY="49.0" prefHeight="25.0" prefWidth="104.0" />
                               <JFXToggleButton fx:id="ActiveRoamToggleButton" layoutX="14.0" layoutY="121.0" text="Actively roam the area" />
