@@ -107,6 +107,7 @@
                                     <JFXCheckBox fx:id="BankOverValueCheckBox" prefHeight="0.0" prefWidth="93.0" text="Bank if we have over X value" GridPane.rowIndex="2" />
                                  </children>
                               </GridPane>
+                              <Spinner fx:id="BankOverSpinner" layoutX="209.0" layoutY="94.0" prefHeight="25.0" prefWidth="106.0" />
                            </children>
                         </AnchorPane>
                   </content>
