@@ -107,9 +107,8 @@
                            <children>
                               <ChoiceBox fx:id="locationChoiceBox" layoutX="244.0" layoutY="43.0" prefWidth="150.0" />
                               <Label layoutX="249.0" layoutY="20.0" text="Preset and saved locations" />
-                             <Spinner fx:id="CustomLootingRadiusSpinner" min="0" max="1000000" initialValue="15" editable="true" layoutX="95.0" layoutY="124.0" prefHeight="25.0" prefWidth="149.0" />
-
-			<	Spinner fx:id="CustomIdleRadiusSpinner" min="0" max="1000000" initialValue="5" editable="true" layoutX="394.0" layoutY="124.0" prefHeight="25.0" prefWidth="149.0" />
+                              <Spinner fx:id="CustomLootingRadiusSpinner" min="0" max="1000000" initialValue="15" editable="true" layoutX="95.0" layoutY="124.0" prefHeight="25.0" prefWidth="149.0" />
+                              <Spinner fx:id="CustomIdleRadiusSpinner" min="0" max="1000000" initialValue="5" editable="true" layoutX="394.0" layoutY="124.0" />
                               <Label layoutX="111.0" layoutY="97.0" text="Custom looting radius" />
                               <Label layoutX="415.0" layoutY="97.0" text="Custom idle radius" />
                               <Button fx:id="SetIdleAreaButton" layoutX="428.0" layoutY="178.0" mnemonicParsing="false" onAction="#setIdleAreaPressed" text="Set idle area" />
