@@ -147,7 +147,7 @@
                                                 <CheckBox fx:id="StopOnDeathCheckBox" mnemonicParsing="false" text="Stop script if we die" GridPane.rowIndex="10" />
                                                 <CheckBox fx:id="ItemIsObjectCheckBox" mnemonicParsing="false" prefWidth="109.0" text="Item is an object" GridPane.rowIndex="9" />
                                                 <CheckBox fx:id="UsePrayerCheckBox" mnemonicParsing="false" text="Use prayers near enemies" GridPane.rowIndex="2" />
-                                                <CheckBox fx:id="HighAlchLoot" mnemonicParsing="false" text="High alch specific loot" GridPane.rowIndex="7" />
+                                                <CheckBox fx:id="HighAlchLootCheckBox" mnemonicParsing="false" text="High alch specific loot" GridPane.rowIndex="7" />
                                             </children>
                                         </GridPane>
                                     </children></AnchorPane>
