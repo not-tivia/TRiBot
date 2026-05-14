@@ -87,8 +87,6 @@ import java.util.function.Supplier;
  *     Fix: Keyboard.pressEscape() to bail out and retry next tick.
  *
  * OPEN
- *   - Item name "Bow string" may actually be "Bowstring" (no space) in current OSRS.
- *     Verify in-game and adjust STRING constant if needed.
  *   - No walking fallback if banker is out of range; Bank.ensureOpen() will loop.
  *   - Specific "string shortbow" / "string longbow" without a wood would currently
  *     produce material name "Shortbow logs" via parseArgs - edge case.
