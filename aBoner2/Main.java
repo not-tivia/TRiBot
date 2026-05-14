@@ -8,6 +8,8 @@ import org.tribot.script.sdk.Inventory;
 import org.tribot.script.sdk.Log;
 import org.tribot.script.sdk.MyPlayer;
 import org.tribot.script.sdk.Waiting;
+import org.tribot.script.sdk.WorldHopper;
+import org.tribot.script.sdk.Worlds;
 import org.tribot.script.sdk.antiban.Antiban;
 import org.tribot.script.sdk.query.Query;
 import org.tribot.script.sdk.script.TribotScript;
@@ -16,12 +18,15 @@ import org.tribot.script.sdk.types.Area;
 import org.tribot.script.sdk.types.EquipmentItem;
 import org.tribot.script.sdk.types.GameObject;
 import org.tribot.script.sdk.types.InventoryItem;
+import org.tribot.script.sdk.types.World;
 import org.tribot.script.sdk.types.WorldTile;
 import org.tribot.script.sdk.util.ScriptSettings;
 import org.tribot.script.sdk.walking.GlobalWalking;
 
 import javax.swing.BorderFactory;
+import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
@@ -35,33 +40,42 @@ import java.util.Optional;
 
 /*
  * CHANGELOG
+ *   1.1.0 (2026-05-14) - PKer panic-escape: if Combat.getAttackingPlayer() is present
+ *                        while in wilderness, ring-tele to GE immediately. If
+ *                        teleblocked, walk south toward GE (best effort).
+ *                        Optional world-hop after each trip via Worlds.getRandomMembers
+ *                        + WorldHopper.hop. Charge tracking confirmed to work as-is:
+ *                        amulet vanishes when fully depleted (equip check fails ->
+ *                        re-equip from bank); ring loses parens in name when at 0
+ *                        charges (nameContains("Ring of wealth (") filters those out).
+ *                        GUI extended with Safety section: panic-on-attack + hop-worlds
+ *                        checkboxes, persisted via ScriptSettings.
  *   1.0.0 (2026-05-14) - Initial scoped-rewrite of aBoner using current SDK.
  *                        Loops GE <-> Chaos altar offering bones.
  *                        Burning amulet (Lava-Maze) out, Ring of wealth back.
- *                        SCOPE: does NOT handle PKer attacks, death recovery,
- *                        amulet/ring depletion replacement, world hopping,
- *                        or any of the original's WINE/LOCATOR/FANATIC suicide
- *                        modes. Assumes: player starts at GE with bones, charged
- *                        Burning amulet, and charged Ring of wealth in bank or
- *                        already equipped.
  *
  * KNOWN-FIX
  *   - Original's onStart() had `args.equals("Dragon bones")` (no-op). Replaced
  *     with proper GUI for bone selection saved via ScriptSettings.
  *   - Original used DaxWalker with paid credentials. GlobalWalking now wraps
  *     this in the SDK without credentials.
+ *   - Burning amulet fully depletes -> disappears from equipment -> our equip check
+ *     fails -> acquireAndEquipAmulet pulls a fresh one from the bank. No special
+ *     charge tracking needed.
+ *   - Ring of wealth at 0 charges becomes "Ring of wealth" (no parens) -> our
+ *     nameContains("Ring of wealth (") predicate excludes the depleted one -> we
+ *     equip a fresh charged one from the bank.
  *
  * OPEN
- *   - No anti-PK / escape logic. If a PKer attacks mid-walk you will likely die.
- *     Run with no risk in inventory beyond a single trip's bones.
- *   - No charge-tracking on Burning amulet or Ring of wealth. Once a worn item
- *     fully depletes, the equip check fails and the script stops. Bank in a
- *     fresh charged one before resuming.
  *   - Hardcoded wilderness path (10+ tiles) from the original is NOT used here;
  *     GlobalWalking handles it. If GlobalWalking takes a worse route than the
  *     hand-tuned path, swap to LocalWalking.walkPath(WILDY_PATH).
  *   - Wilderness teleport confirmation dialog (if any) is handled via
  *     ChatScreen.selectOption("Yes"). Verify the option text in-game.
+ *   - Panic-escape uses the wilderness Combat API; brief windows after a PKer
+ *     spawns but before they're "attacking" may not be detected. Consider
+ *     supplementing with a nearby-player scan (Query.players().maxDistance(N)
+ *     filtered by combat-level being within wilderness PVP range).
  */
 @TribotScriptManifest(
         name = "aBoner",
@@ -86,6 +100,9 @@ public class Main implements TribotScript {
     private static final long STUCK_TIMEOUT_MS = 5 * 60_000;
 
     private String boneName = "Dragon bones";
+    private boolean hopBetweenTrips = false;
+    private boolean panicOnAttack = true;
+    private boolean shouldHopAfterReturn = false;
     private final String[] boneA() { return new String[]{ boneName }; }
 
     @Override
@@ -123,11 +140,25 @@ public class Main implements TribotScript {
             }
         }
 
+        // PKer panic check: if a player is targeting us in the wilderness, bail out.
+        if (panicOnAttack && Combat.isInWilderness() && Combat.getAttackingPlayer().isPresent()) {
+            panicEscape();
+            return;
+        }
+
         boolean atGE = GE_AREA.containsMyPlayer();
         boolean atAltar = ALTAR_AREA.containsMyPlayer();
         boolean hasBones = Inventory.contains(boneA());
         boolean amuletOn = isAmuletEquipped();
         boolean ringOn = isRingEquipped();
+
+        // World hop on return to GE (if enabled). Do this BEFORE any bank/withdraw
+        // because hopping resets the bank state.
+        if (atGE && shouldHopAfterReturn && hopBetweenTrips) {
+            hopWorld();
+            shouldHopAfterReturn = false;
+            return;
+        }
 
         // At altar: use bones, else tele back via ring.
         if (atAltar) {
@@ -252,6 +283,28 @@ public class Main implements TribotScript {
         Log.info("Teleporting via Ring of wealth -> Grand Exchange.");
         if (ring.get().click("Grand Exchange")) {
             Waiting.waitUntil(6000, GE_AREA::containsMyPlayer);
+            shouldHopAfterReturn = true; // arm world-hop check on next tick at GE
+        }
+    }
+
+    private void panicEscape() {
+        if (MyPlayer.getTeleblockState().isPresent()) {
+            Log.warn("PKer attacking AND teleblocked. Walking out (likely death).");
+            GlobalWalking.walkTo(GE_TILE);
+            return;
+        }
+        Log.warn("PKer attacking. Panic-tele via ring.");
+        teleToGE();
+    }
+
+    private void hopWorld() {
+        Optional<World> target = Worlds.getRandomMembers();
+        if (!target.isPresent()) { Log.warn("No members world available to hop."); return; }
+        int num = target.get().getWorldNumber();
+        if (num == WorldHopper.getCurrentWorld()) return;
+        Log.info("Hopping to world " + num);
+        if (WorldHopper.hop(num)) {
+            Waiting.waitNormal(3500, 1000);
         }
     }
 
@@ -267,11 +320,17 @@ public class Main implements TribotScript {
         }
     }
 
-    private static class BonerSettings { public String boneName = "Dragon bones"; }
+    private static class BonerSettings {
+        public String boneName = "Dragon bones";
+        public boolean hopBetweenTrips = false;
+        public boolean panicOnAttack = true;
+    }
 
     private boolean showSettingsDialog() {
         final BonerSettings cur = loadSettings();
         boneName = cur.boneName;
+        hopBetweenTrips = cur.hopBetweenTrips;
+        panicOnAttack = cur.panicOnAttack;
         final boolean[] ok = { false };
         try {
             SwingUtilities.invokeAndWait(() -> {
@@ -280,17 +339,34 @@ public class Main implements TribotScript {
                 JComboBox<String> boneBox = new JComboBox<>(new String[]{
                         "Dragon bones", "Big bones", "Superior dragon bones" });
                 boneBox.setSelectedItem(cur.boneName);
+                JCheckBox cbHop = new JCheckBox("Hop worlds between trips", cur.hopBetweenTrips);
+                JCheckBox cbPanic = new JCheckBox("Panic-tele via ring on PKer attack", cur.panicOnAttack);
 
-                JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT));
-                p.setBorder(BorderFactory.createTitledBorder("Bones to offer"));
-                p.add(new JLabel("Bone:"));
-                p.add(boneBox);
+                JPanel boneP = new JPanel(new FlowLayout(FlowLayout.LEFT));
+                boneP.setBorder(BorderFactory.createTitledBorder("Bones"));
+                boneP.add(new JLabel("Type:"));
+                boneP.add(boneBox);
+
+                JPanel safetyP = new JPanel();
+                safetyP.setLayout(new BoxLayout(safetyP, BoxLayout.Y_AXIS));
+                safetyP.setBorder(BorderFactory.createTitledBorder("Safety"));
+                safetyP.add(cbPanic);
+                safetyP.add(cbHop);
+
+                JPanel center = new JPanel();
+                center.setLayout(new BoxLayout(center, BoxLayout.Y_AXIS));
+                center.add(boneP);
+                center.add(safetyP);
 
                 JButton start = new JButton("Start");
                 JButton cancel = new JButton("Cancel");
                 start.addActionListener(e -> {
                     cur.boneName = (String) boneBox.getSelectedItem();
+                    cur.hopBetweenTrips = cbHop.isSelected();
+                    cur.panicOnAttack = cbPanic.isSelected();
                     boneName = cur.boneName;
+                    hopBetweenTrips = cur.hopBetweenTrips;
+                    panicOnAttack = cur.panicOnAttack;
                     saveSettings(cur);
                     ok[0] = true; dlg.dispose();
                 });
@@ -299,7 +375,7 @@ public class Main implements TribotScript {
                 btns.add(start); btns.add(cancel);
 
                 dlg.setLayout(new BorderLayout());
-                dlg.add(p, BorderLayout.CENTER);
+                dlg.add(center, BorderLayout.CENTER);
                 dlg.add(btns, BorderLayout.SOUTH);
                 dlg.pack(); dlg.setLocationRelativeTo(null); dlg.setVisible(true);
             });
