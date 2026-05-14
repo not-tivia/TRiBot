@@ -23,6 +23,10 @@ import java.util.Optional;
 
 /*
  * CHANGELOG
+ *   1.0.2 (2026-05-14) - Drop dynamic last-visible widget search entirely.
+ *                        Hardcoded: 270.15 = Ball of wool, 270.16 = Bow string.
+ *                        Pick by level (>=10 -> bow string, else ball of wool).
+ *   1.0.1 (2026-05-14) - Cap last-visible item-slot search at 270.25 (superseded by 1.0.2).
  *   1.0.0 (2026-05-14) - Initial modern rewrite of aBowStringer using current SDK.
  *                        F2P-testable (Lumbridge top-floor spinning wheel + bank).
  *                        Auto picks Flax (lvl 10+) or Wool (<10). GlobalWalking handles
@@ -135,20 +139,18 @@ public class Main implements TribotScript {
         // If make-X is already up, click the highest-tier visible item.
         Optional<Widget> labels = Widgets.get(new int[]{ 270, 14 });
         if (labels.isPresent() && labels.get().isVisible()) {
-            Optional<Widget> master = Widgets.get(new int[]{ 270 });
-            if (!master.isPresent()) return;
-            List<Widget> children = master.get().getChildren();
-            if (children == null) return;
-            for (int i = children.size() - 1; i >= 15; i--) {
-                Widget c = children.get(i);
-                if (c != null && c.isVisible()) {
-                    Log.info("Clicking 270." + i + " (" + (useFlax ? BOW_STRING : BALL_OF_WOOL) + ")");
-                    if (c.click()) Waiting.waitUntil(4000, () -> MyPlayer.getAnimation() != -1);
-                    return;
-                }
+            // Spinning wheel make-X (assumed): 270.15 ball of wool, 270.16 bow string.
+            int childIdx = useFlax ? 16 : 15;
+            Optional<Widget> target = Widgets.get(new int[]{ 270, childIdx });
+            if (!target.isPresent() || !target.get().isVisible()) {
+                Log.warn("Make-X 270." + childIdx + " not visible. Pressing Escape.");
+                Keyboard.pressEscape();
+                return;
             }
-            Log.warn("Make-X open but no clickable item. Pressing Escape.");
-            Keyboard.pressEscape();
+            Log.info("Clicking 270." + childIdx + " (" + (useFlax ? BOW_STRING : BALL_OF_WOOL) + ")");
+            if (target.get().click()) {
+                Waiting.waitUntil(4000, () -> MyPlayer.getAnimation() != -1);
+            }
             return;
         }
 

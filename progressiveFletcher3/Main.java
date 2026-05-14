@@ -37,6 +37,15 @@ import java.util.function.Supplier;
 
 /*
  * CHANGELOG
+ *   1.0.4 (2026-05-14) - Drop dynamic last-visible widget search entirely.
+ *                        Hardcoded fletchChildForLevel: <5 -> 270.15 arrow shafts,
+ *                        <10 -> 270.16 shortbow, else 270.17 longbow.
+ *                        Specific-mode args still use widgetChildOverride which routes
+ *                        to the same fixed indices via parseArgs.
+ *   1.0.3 (2026-05-14) - Cap the last-visible item-slot search at 270.25 (superseded).
+ *                        Widget 270 has many non-item children at indices well past
+ *                        the item slots — script was finding e.g. 270.34 and clicking
+ *                        it, which never started fletching.
  *   1.0.2 (2026-05-14) - craft() now waits for the make-X dialog to actually open
  *                        after useOn(). Without this, the next tick fired ~350ms later
  *                        re-issued useOn before the dialog had a chance to appear,
@@ -349,30 +358,27 @@ public class Main implements TribotScript {
             return;
         }
 
-        if (widgetChildOverride >= 0) {
-            Optional<Widget> w = Widgets.get(new int[]{ 270, widgetChildOverride });
-            if (w.isPresent() && w.get().isVisible()) {
-                Log.info("Clicking 270." + widgetChildOverride + " (" + mat + ")");
-                if (w.get().click()) Waiting.waitUntil(4000, () -> MyPlayer.getAnimation() != -1);
-                return;
-            }
+        // Fletching make-X is fixed: 270.15 arrow shafts, 270.16 shortbow, 270.17 longbow.
+        // Specific-mode args set widgetChildOverride directly; progressive picks by level.
+        int childIdx = (widgetChildOverride > 0) ? widgetChildOverride : fletchChildForLevel();
+        Optional<Widget> target = Widgets.get(new int[]{ 270, childIdx });
+        if (!target.isPresent() || !target.get().isVisible()) {
+            Log.warn("Make-X widget 270." + childIdx + " not visible. Pressing Escape.");
+            Keyboard.pressEscape();
+            Waiting.waitNormal(400, 100);
+            return;
         }
+        Log.info("Clicking 270." + childIdx + " (" + mat + ")");
+        if (target.get().click()) {
+            Waiting.waitUntil(4000, () -> MyPlayer.getAnimation() != -1);
+        }
+    }
 
-        Optional<Widget> master = Widgets.get(new int[]{ 270 });
-        if (!master.isPresent()) return;
-        List<Widget> children = master.get().getChildren();
-        if (children == null) return;
-        for (int i = children.size() - 1; i >= 15; i--) {
-            Widget c = children.get(i);
-            if (c != null && c.isVisible()) {
-                Log.info("Clicking 270." + i + " (" + mat + ")");
-                if (c.click()) Waiting.waitUntil(4000, () -> MyPlayer.getAnimation() != -1);
-                return;
-            }
-        }
-        Log.warn("Make-X open but no clickable item found. Pressing Escape to recover.");
-        Keyboard.pressEscape();
-        Waiting.waitNormal(400, 100);
+    private int fletchChildForLevel() {
+        int level = Skill.FLETCHING.getActualLevel();
+        if (level < 5)  return 15; // Arrow shafts
+        if (level < 10) return 16; // Shortbow
+        return 17;                 // Longbow
     }
 
     private String logForLevel(int level) {

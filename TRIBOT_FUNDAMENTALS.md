@@ -166,6 +166,32 @@ if (labels.isPresent() && labels.get().isVisible()) {
 
 Click `Widgets.get(new int[]{ 270, childIdx })` where childIdx is the item's slot.
 
+### Prefer explicit widget indices over dynamic search
+
+When the in-game widget indices for a recipe are known (either confirmed in widget
+explorer or documented above), **hardcode them**. Don't build dynamic "find the last
+visible child >= 15" searches as a fallback.
+
+Reason: widget 270 has many visible children at indices well past the item slots
+(quantity selector, containers, decorations). A "last-visible >= 15" search picks
+those up and clicks the wrong thing — typically a no-op that makes the script look
+broken (widget click logs but no animation starts). Confirmed in fletcher 1.0.3 where
+this caused `Clicking 270.34` to fire instead of an item slot.
+
+Pattern that works:
+
+```java
+private int childForLevel(int level) {
+    if (level < 5)  return 15; // recipe-specific item @ slot 15
+    if (level < 10) return 16; // ... slot 16
+    return 17;                 // ... slot 17
+}
+
+int childIdx = childForLevel(Skill.X.getActualLevel());
+Optional<Widget> target = Widgets.get(new int[]{ 270, childIdx });
+if (target.isPresent() && target.get().isVisible()) target.get().click();
+```
+
 ### Why widgets, not `MakeScreen.makeAll(...)`
 
 `MakeScreen.contains(...)` and `MakeScreen.makeAll(...)` look correct on paper but
