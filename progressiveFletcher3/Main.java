@@ -37,6 +37,13 @@ import java.util.function.Supplier;
 
 /*
  * CHANGELOG
+ *   1.0.2 (2026-05-14) - craft() now waits for the make-X dialog to actually open
+ *                        after useOn(). Without this, the next tick fired ~350ms later
+ *                        re-issued useOn before the dialog had a chance to appear,
+ *                        causing knife->log to fire twice in a row and (in some cases)
+ *                        cancelling the in-progress dialog open so fletching never
+ *                        started. The crafter already had this wait; the fletcher
+ *                        was missing it.
  *   1.0.1 (2026-05-14) - Fletching make-X widget index mapping corrected:
  *                        270.15 = arrow shafts, 270.16 = shortbow, 270.17 = longbow.
  *                        Specific-mode "shortbow" was clicking 270.15 (arrow shafts) - now 270.16.
@@ -331,7 +338,14 @@ public class Main implements TribotScript {
         if (!labels.isPresent() || !labels.get().isVisible()) {
             Optional<InventoryItem> t = Query.inventory().nameEquals(toolA).findFirst();
             Optional<InventoryItem> m = Query.inventory().nameEquals(matA).findFirst();
-            if (t.isPresent() && m.isPresent()) t.get().useOn(m.get());
+            if (!t.isPresent() || !m.isPresent()) return;
+            Log.info("Using " + tool + " on " + mat);
+            if (t.get().useOn(m.get())) {
+                // Wait for make-X to actually open before falling through to next tick;
+                // otherwise we'd useOn again and clobber the dialog.
+                Waiting.waitUntil(3000, () ->
+                        Widgets.get(new int[]{ 270, 14 }).map(Widget::isVisible).orElse(false));
+            }
             return;
         }
 
