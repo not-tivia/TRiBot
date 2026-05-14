@@ -37,6 +37,13 @@ import java.util.function.Supplier;
 
 /*
  * CHANGELOG
+ *   1.0.5 (2026-05-14) - fletchChildForLevel now tracks per-tier shortbow/longbow
+ *                        unlocks. Previously it only checked base unlocks (5/10)
+ *                        and assumed longbow at any level >=10, which meant at e.g.
+ *                        level 65 (yew shortbow unlock, yew longbow at 70) the
+ *                        script would click 270.17 trying to make a yew longbow it
+ *                        didn't have the level for. Now: shortbow within [tier_short,
+ *                        tier_long), longbow at [tier_long, next_tier_short).
  *   1.0.4 (2026-05-14) - Drop dynamic last-visible widget search entirely.
  *                        Hardcoded fletchChildForLevel: <5 -> 270.15 arrow shafts,
  *                        <10 -> 270.16 shortbow, else 270.17 longbow.
@@ -376,9 +383,28 @@ public class Main implements TribotScript {
 
     private int fletchChildForLevel() {
         int level = Skill.FLETCHING.getActualLevel();
-        if (level < 5)  return 15; // Arrow shafts
-        if (level < 10) return 16; // Shortbow
-        return 17;                 // Longbow
+        // Each wood tier has its own shortbow/longbow pair (shortbow first, longbow +5):
+        //   Logs    shortbow 5,  longbow 10
+        //   Oak     shortbow 20, longbow 25
+        //   Willow  shortbow 35, longbow 40
+        //   Maple   shortbow 50, longbow 55
+        //   Yew     shortbow 65, longbow 70
+        //   Magic   shortbow 80, longbow 85
+        // logForLevel switches log type at the next tier's shortbow unlock,
+        // so within a tier we just check if longbow is unlocked yet.
+        if (level < 5)  return 15;                                        // arrow shafts
+        if (level < 10) return 16;                                        // logs shortbow
+        if (level < 20) return 17;                                        // logs longbow
+        if (level < 25) return 16;                                        // oak shortbow
+        if (level < 35) return 17;                                        // oak longbow
+        if (level < 40) return 16;                                        // willow shortbow
+        if (level < 50) return 17;                                        // willow longbow
+        if (level < 55) return 16;                                        // maple shortbow
+        if (level < 65) return 17;                                        // maple longbow
+        if (level < 70) return 16;                                        // yew shortbow
+        if (level < 80) return 17;                                        // yew longbow
+        if (level < 85) return 16;                                        // magic shortbow
+        return 17;                                                        // magic longbow
     }
 
     private String logForLevel(int level) {
