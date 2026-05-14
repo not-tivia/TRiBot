@@ -21,6 +21,27 @@ import org.tribot.script.sdk.walking.GlobalWalking;
 import java.util.List;
 import java.util.Optional;
 
+/*
+ * CHANGELOG
+ *   1.0.0 (2026-05-14) - Initial modern rewrite of aBowStringer using current SDK.
+ *                        F2P-testable (Lumbridge top-floor spinning wheel + bank).
+ *                        Auto picks Flax (lvl 10+) or Wool (<10). GlobalWalking handles
+ *                        bank<->wheel travel. Make-X selection via last-visible widget
+ *                        child of 270 (>= idx 15). Selective deposit, Escape recovery,
+ *                        5-min stuck detection.
+ *
+ * KNOWN-FIX
+ *   - Legacy script used DaxWalker with paid credentials. Modern SDK ships
+ *     GlobalWalking.walkToBank() / walkTo(WorldTile) which uses the same engine
+ *     without credentials.
+ *
+ * OPEN
+ *   - Item names "Flax", "Wool", "Bow string", "Ball of wool" need in-game verification;
+ *     capitalization/spacing has shifted over the years in OSRS.
+ *   - Hardcoded WHEEL_TILE assumes Lumbridge. To support other wheel locations, accept
+ *     an args string and parse a tile, or detect wheel via Query.gameObjects()
+ *     before falling back to walking to Lumbridge.
+ */
 @TribotScriptManifest(
         name = "aBowStringer",
         author = "adamhackz (rewrite)",

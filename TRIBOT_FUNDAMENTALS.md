@@ -343,3 +343,49 @@ When porting an old script, look for these:
 | `General.println(...)` | `Log.info(...)` / `Log.warn(...)` / `Log.error(...)` |
 | `NPCChat.getClickContinueInterface()` | `ChatScreen.isClickContinueOpen()` + `clickContinue()` |
 | `Keyboard.typeSend(" ")` | `Keyboard.pressEscape()` / `pressEnter()` / `pressBack()` |
+
+---
+
+## 16. Changelog Convention
+
+Every script's `Main.java` gets a block comment **between the imports and the class
+declaration**:
+
+```java
+package scripts.myscript;
+
+import ...;
+
+/*
+ * CHANGELOG
+ *   1.0.0 (YYYY-MM-DD) - Initial release. <one-line description of behavior>.
+ *   1.0.1 (YYYY-MM-DD) - <what changed and why>.
+ *
+ * KNOWN-FIX
+ *   - Symptom: <what the user sees>
+ *     Cause:   <root cause>
+ *     Fix:     <where in the code it's handled OR how to recover manually>
+ *
+ * OPEN
+ *   - <issue / TODO that isn't yet handled in code>
+ */
+@TribotScriptManifest(...)
+public class Main implements TribotScript { ... }
+```
+
+### Rules
+
+- **CHANGELOG entries are high-signal.** "Fixed compile error" or "renamed variable"
+  don't belong here — the git history covers that. Only entries that change behavior,
+  surface a new option, or document a class of fix worth remembering.
+- **KNOWN-FIX entries are write-once.** When a bug class is fixed in code, document it
+  so future-you doesn't re-hit it. Reads like a troubleshooting FAQ.
+- **OPEN entries are the to-do list.** Promote to CHANGELOG when resolved, then remove
+  from OPEN.
+- **Versions follow MAJOR.MINOR.PATCH.** MAJOR for incompatible workflow changes (new
+  args, new modes), MINOR for new features, PATCH for fixes.
+- **Dates are ISO `YYYY-MM-DD`**, not "yesterday" / "Thursday".
+
+The same block can grow over time. Don't delete old CHANGELOG entries — they're history.
+KNOWN-FIX entries can be pruned if a class of bug becomes irrelevant (e.g. SDK API
+change makes the workaround unnecessary).

@@ -29,6 +29,27 @@ import java.awt.FlowLayout;
 import java.awt.Frame;
 import java.util.Optional;
 
+/*
+ * CHANGELOG
+ *   1.0.0 (2026-05-14) - Initial modern rewrite of progressiveCrafter using current SDK.
+ *                        State machine + widget-based make-X clicking (270.15-20).
+ *                        Selective deposit (keep needle/thread/leather, deposit rest).
+ *                        Stuck detection (5min, antiban-aware).
+ *                        Swing settings dialog: auto-progress by level or specific item.
+ *
+ * KNOWN-FIX
+ *   - Bank.withdrawAll(tool) would pull a whole stack and fill inventory.
+ *     Fix: Bank.withdraw(NEEDLE, 1) + early return if not landed before bulk material.
+ *   - Skill.getCurrentLevel() returns boosted level which mis-gates unlocks.
+ *     Fix: use Skill.CRAFTING.getActualLevel() instead.
+ *   - Modern make-X dialog has 270.14 as a labels container, items shifted to 270.15+.
+ *     Fix: childForLevel() maps level -> 270.15..270.20 (gloves..chaps).
+ *
+ * OPEN
+ *   - Coif (level 38+) not handled. childForLevel caps at 270.20 (chaps).
+ *     Verify Coif's actual widget index with widget explorer when leveled.
+ *   - No Escape recovery for make-X stuck state (fletcher has this, crafter does not).
+ */
 @TribotScriptManifest(
         name = "ProgressiveCrafter",
         author = "adamhackz (rewrite)",

@@ -35,6 +35,36 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
 
+/*
+ * CHANGELOG
+ *   1.0.0 (2026-05-14) - Initial modern rewrite of progressiveFletcher2 using current SDK.
+ *                        State machine + widget-based make-X (last-visible child of 270 from idx 15).
+ *                        Four modes via args: progressive cut, progressive string,
+ *                        specific cut ("yew longbow"), specific string ("string yew longbow").
+ *                        Selective deposit. Bank.withdraw(tool, 1) to avoid stack overflow.
+ *                        Stuck detection (5min, antiban-aware).
+ *                        Escape-key recovery for make-X stuck with no clickable child.
+ *                        Stringing-pin: chosen unstrung bow does not reshuffle mid-batch.
+ *                        Swing settings dialog with JSON persistence via ScriptSettings.
+ *
+ * KNOWN-FIX
+ *   - SDK methods take String[] not varargs. `Bank.depositAllExcept(NEEDLE, THREAD)`
+ *     fails to compile. Wrap in arrays (FLAX_A, KNIFE_A, TOOLS etc.).
+ *   - `Bank.depositAllExcept` does not exist in 1.0.71. Iterate inventory and use
+ *     `Bank.depositAll(name)` for non-keep items (see depositNonKeepItems).
+ *   - Level brackets must use next-tier SHORTBOW unlock levels (20, 35, 50, 65, 80).
+ *     Longbow unlock levels (25, 40, 55, 70, 85) are wrong - would miss 5 levels of
+ *     better-tier shortbow. SDK auto-upgrades shortbow->longbow via last-visible.
+ *   - Make-X dialog open but no clickable item => loop forever.
+ *     Fix: Keyboard.pressEscape() to bail out and retry next tick.
+ *
+ * OPEN
+ *   - Item name "Bow string" may actually be "Bowstring" (no space) in current OSRS.
+ *     Verify in-game and adjust STRING constant if needed.
+ *   - No walking fallback if banker is out of range; Bank.ensureOpen() will loop.
+ *   - Specific "string shortbow" / "string longbow" without a wood would currently
+ *     produce material name "Shortbow logs" via parseArgs - edge case.
+ */
 @TribotScriptManifest(
         name = "ProgressiveFletcher",
         author = "adamhackz (rewrite)",
