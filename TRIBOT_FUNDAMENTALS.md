@@ -130,10 +130,21 @@ everything in one click (useful when keep-set is empty, but you'd then re-withdr
 
 Modern OSRS make-X master widget is **270**. Structure:
 - `270.14` — `BOTTOM` container holding the keyboard-shortcut labels ("Space", "2", "3"...)
-- `270.15..270.20+` — actual clickable item squares (only unlocked items are shown)
+- `270.15..270.N` — actual clickable item squares (only unlocked items are shown)
 
 The legacy script convention `Interfaces.get(270, 14)` referenced what was then the first
 item slot. That slot has shifted by +1 — items now live at `270.15` onwards.
+
+### Confirmed item slot indices by recipe
+
+| Recipe (tool + material) | 270.15 | 270.16 | 270.17 | 270.18 | 270.19 | 270.20 |
+|---|---|---|---|---|---|---|
+| Knife + Logs (any wood) | Arrow shafts | Shortbow | Longbow | — | — | — |
+| Needle + Leather | Gloves | Boots | Cowl | Vambraces | Body | Chaps |
+| (Coif at 38+ likely 270.21 — needs verification) | | | | | | |
+
+These slots are stable as long as the recipe stays the same. Different recipes (e.g.
+gem cutting, herblore) will have their own item layouts at 270.15+.
 
 ### Progressive selection (highest-tier visible)
 

@@ -37,6 +37,11 @@ import java.util.function.Supplier;
 
 /*
  * CHANGELOG
+ *   1.0.1 (2026-05-14) - Fletching make-X widget index mapping corrected:
+ *                        270.15 = arrow shafts, 270.16 = shortbow, 270.17 = longbow.
+ *                        Specific-mode "shortbow" was clicking 270.15 (arrow shafts) - now 270.16.
+ *                        Specific-mode "longbow" now explicitly maps to 270.17 (was relying on
+ *                        last-visible fallback). "arrows"/"arrow shafts" routes to 270.15.
  *   1.0.0 (2026-05-14) - Initial modern rewrite of progressiveFletcher2 using current SDK.
  *                        State machine + widget-based make-X (last-visible child of 270 from idx 15).
  *                        Four modes via args: progressive cut, progressive string,
@@ -245,7 +250,9 @@ public class Main implements TribotScript {
             final String log = matName;
             tool = KNIFE;
             material = () -> log;
-            if (typeWord.contains("short")) widgetChildOverride = 15;
+            if (typeWord.contains("short")) widgetChildOverride = 16; // shortbow @ 270.16
+            else if (typeWord.contains("long")) widgetChildOverride = 17; // longbow @ 270.17
+            else if (typeWord.contains("arrow")) widgetChildOverride = 15; // arrow shafts @ 270.15
         }
     }
 
