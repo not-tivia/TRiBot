@@ -16,13 +16,34 @@ import org.tribot.script.sdk.script.TribotScriptManifest;
 import org.tribot.script.sdk.types.GameObject;
 import org.tribot.script.sdk.types.Widget;
 import org.tribot.script.sdk.types.WorldTile;
+import org.tribot.script.sdk.util.ScriptSettings;
 import org.tribot.script.sdk.walking.GlobalWalking;
 
+import javax.swing.BorderFactory;
+import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JDialog;
+import javax.swing.JLabel;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.SwingUtilities;
+import javax.swing.WindowConstants;
+import java.awt.BorderLayout;
+import java.awt.FlowLayout;
+import java.awt.Frame;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.1.0 (2026-05-14) - Multi-profile save/load + args support + Swing GUI.
+ *                        Settings consist of a single field: materialMode ("auto" /
+ *                        "flax" / "wool"). Profile system namespaced under
+ *                        "a_bow_stringer_<name>". execute(args) tries args as profile
+ *                        name, falls back to "flax" / "wool" / "auto" as mode override,
+ *                        else shows dialog.
  *   1.0.2 (2026-05-14) - Drop dynamic last-visible widget search entirely.
  *                        Hardcoded: 270.15 = Ball of wool, 270.16 = Bow string.
  *                        Pick by level (>=10 -> bow string, else ball of wool).
@@ -68,19 +89,48 @@ public class Main implements TribotScript {
     // Lumbridge top-floor spinning wheel (default F2P-friendly location).
     private static final WorldTile WHEEL_TILE = new WorldTile(3209, 3213, 1);
 
+    private static final String SETTINGS_PREFIX = "a_bow_stringer_";
+    private static final String DEFAULT_PROFILE = "default";
+
     private volatile boolean running = true;
     private long lastProgressMs = System.currentTimeMillis();
     private static final long STUCK_TIMEOUT_MS = 5 * 60_000;
 
+    // "auto" (level-based), "flax" (force bow strings), "wool" (force balls of wool).
+    private String materialMode = "auto";
+
     @Override
     public void execute(final String args) {
-        Log.info("aBowStringer started.");
+        if (args != null && !args.trim().isEmpty()) {
+            String name = args.trim();
+            Optional<StringerSettings> loaded = ScriptSettings.getDefault()
+                    .load(SETTINGS_PREFIX + name, StringerSettings.class);
+            if (loaded.isPresent()) {
+                materialMode = loaded.get().materialMode;
+                Log.info("Loaded profile from args: '" + name + "'");
+            } else if (name.equalsIgnoreCase("flax") || name.equalsIgnoreCase("wool") || name.equalsIgnoreCase("auto")) {
+                materialMode = name.toLowerCase();
+                Log.info("Args '" + name + "' used as material mode override.");
+            } else {
+                Log.warn("Args '" + name + "' not a profile or known mode; showing dialog.");
+                if (!showSettingsDialog()) { Log.info("Cancelled. Exiting."); return; }
+            }
+        } else {
+            if (!showSettingsDialog()) { Log.info("Cancelled. Exiting."); return; }
+        }
+        Log.info("aBowStringer started. mode=" + materialMode);
         Antiban.setScriptAiAntibanEnabled(true);
         while (running) {
             try { tick(); } catch (Exception e) { Log.error("Tick failed: " + e.getMessage()); }
             Waiting.waitNormal(350, 120);
         }
         Log.info("aBowStringer stopping.");
+    }
+
+    private boolean shouldUseFlax() {
+        if ("flax".equals(materialMode)) return true;
+        if ("wool".equals(materialMode)) return false;
+        return Skill.CRAFTING.getActualLevel() >= 10;
     }
 
     private void tick() {
@@ -95,7 +145,7 @@ public class Main implements TribotScript {
 
         if (ChatScreen.isClickContinueOpen()) { ChatScreen.clickContinue(); return; }
 
-        boolean useFlax = Skill.CRAFTING.getActualLevel() >= 10;
+        boolean useFlax = shouldUseFlax();
         final String   resource  = useFlax ? FLAX        : WOOL;
         final String[] resourceA = useFlax ? FLAX_A      : WOOL_A;
         final String[] productA  = useFlax ? BOW_STRING_A : BALL_OF_WOOL_A;
@@ -169,5 +219,125 @@ public class Main implements TribotScript {
         if (wheel.get().interact("Spin")) {
             Waiting.waitUntil(3000, () -> Widgets.get(new int[]{ 270, 14 }).map(Widget::isVisible).orElse(false));
         }
+    }
+
+    // ---------- Settings + Profiles ----------
+
+    public static class StringerSettings {
+        public String materialMode = "auto"; // auto | flax | wool
+    }
+
+    private List<String> getProfileNames() {
+        try {
+            return ScriptSettings.getDefault().getSaveNames().stream()
+                    .filter(n -> n.startsWith(SETTINGS_PREFIX))
+                    .map(n -> n.substring(SETTINGS_PREFIX.length()))
+                    .sorted()
+                    .collect(Collectors.toList());
+        } catch (Exception e) { return Collections.emptyList(); }
+    }
+
+    private StringerSettings loadProfile(String name) {
+        try {
+            return ScriptSettings.getDefault()
+                    .load(SETTINGS_PREFIX + name, StringerSettings.class)
+                    .orElseGet(StringerSettings::new);
+        } catch (Exception e) { return new StringerSettings(); }
+    }
+
+    private void saveProfile(String name, StringerSettings s) {
+        try { ScriptSettings.getDefault().save(SETTINGS_PREFIX + name, s); }
+        catch (Exception e) { Log.warn("Save '" + name + "' failed: " + e.getMessage()); }
+    }
+
+    private void deleteProfile(String name) {
+        try { ScriptSettings.getDefault().delete(SETTINGS_PREFIX + name); }
+        catch (Exception e) { Log.warn("Delete '" + name + "' failed: " + e.getMessage()); }
+    }
+
+    private void refreshProfileBox(JComboBox<String> box) {
+        Object selected = box.getSelectedItem();
+        box.removeAllItems();
+        for (String n : getProfileNames()) box.addItem(n);
+        if (selected != null) box.setSelectedItem(selected);
+    }
+
+    private boolean showSettingsDialog() {
+        final StringerSettings initial = loadProfile(DEFAULT_PROFILE);
+        materialMode = initial.materialMode;
+        final boolean[] ok = { false };
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                JDialog dlg = new JDialog((Frame) null, "aBowStringer", true);
+                dlg.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+
+                JComboBox<String> modeBox = new JComboBox<>(new String[]{ "auto", "flax", "wool" });
+                modeBox.setSelectedItem(materialMode);
+
+                JComboBox<String> profileBox = new JComboBox<>(getProfileNames().toArray(new String[0]));
+                JButton loadBtn = new JButton("Load");
+                JButton saveAsBtn = new JButton("Save as...");
+                JButton deleteBtn = new JButton("Delete");
+                loadBtn.addActionListener(e -> {
+                    String name = (String) profileBox.getSelectedItem();
+                    if (name == null || name.isEmpty()) return;
+                    materialMode = loadProfile(name).materialMode;
+                    modeBox.setSelectedItem(materialMode);
+                    Log.info("Loaded profile: " + name);
+                });
+                saveAsBtn.addActionListener(e -> {
+                    String name = JOptionPane.showInputDialog(dlg, "Profile name:", "Save Profile", JOptionPane.QUESTION_MESSAGE);
+                    if (name == null || name.trim().isEmpty()) return;
+                    name = name.trim();
+                    StringerSettings s = new StringerSettings();
+                    s.materialMode = (String) modeBox.getSelectedItem();
+                    saveProfile(name, s);
+                    refreshProfileBox(profileBox);
+                    profileBox.setSelectedItem(name);
+                });
+                deleteBtn.addActionListener(e -> {
+                    String name = (String) profileBox.getSelectedItem();
+                    if (name == null || name.isEmpty()) return;
+                    int c = JOptionPane.showConfirmDialog(dlg, "Delete profile '" + name + "'?",
+                            "Confirm Delete", JOptionPane.YES_NO_OPTION);
+                    if (c == JOptionPane.YES_OPTION) {
+                        deleteProfile(name);
+                        refreshProfileBox(profileBox);
+                    }
+                });
+                JPanel profileRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+                profileRow.setBorder(BorderFactory.createTitledBorder("Profile"));
+                profileRow.add(new JLabel("Saved:"));
+                profileRow.add(profileBox);
+                profileRow.add(loadBtn);
+                profileRow.add(saveAsBtn);
+                profileRow.add(deleteBtn);
+
+                JPanel modeP = new JPanel(new FlowLayout(FlowLayout.LEFT));
+                modeP.setBorder(BorderFactory.createTitledBorder("Material"));
+                modeP.add(new JLabel("Mode:"));
+                modeP.add(modeBox);
+
+                JButton start = new JButton("Start");
+                JButton cancel = new JButton("Cancel");
+                start.addActionListener(e -> {
+                    materialMode = (String) modeBox.getSelectedItem();
+                    StringerSettings s = new StringerSettings();
+                    s.materialMode = materialMode;
+                    saveProfile(DEFAULT_PROFILE, s);
+                    ok[0] = true; dlg.dispose();
+                });
+                cancel.addActionListener(e -> dlg.dispose());
+                JPanel btns = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+                btns.add(start); btns.add(cancel);
+
+                dlg.setLayout(new BorderLayout());
+                dlg.add(profileRow, BorderLayout.NORTH);
+                dlg.add(modeP, BorderLayout.CENTER);
+                dlg.add(btns, BorderLayout.SOUTH);
+                dlg.pack(); dlg.setLocationRelativeTo(null); dlg.setVisible(true);
+            });
+        } catch (Exception e) { Log.error("Dialog failed: " + e.getMessage()); return false; }
+        return ok[0];
     }
 }
