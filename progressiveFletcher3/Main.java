@@ -23,6 +23,7 @@ import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JRadioButton;
 import javax.swing.SwingUtilities;
@@ -31,12 +32,20 @@ import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.awt.Frame;
 import java.awt.GridLayout;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.1.0 (2026-05-14) - Multi-profile save/load. GUI gains Profile row at the top
+ *                        (dropdown + Load / Save as... / Delete). Profiles namespaced
+ *                        under "progressive_fletcher_<name>" in ScriptSettings.
+ *                        execute(args): tries args as profile name first; falls back
+ *                        to existing parseArgs format ("progressive", "yew longbow",
+ *                        "string yew longbow", etc.) if not a saved profile.
  *   1.0.5 (2026-05-14) - fletchChildForLevel now tracks per-tier shortbow/longbow
  *                        unlocks. Previously it only checked base unlocks (5/10)
  *                        and assumed longbow at any level >=10, which meant at e.g.
@@ -102,6 +111,9 @@ public class Main implements TribotScript {
     private static final String KNIFE  = "Knife";
     private static final String STRING = "Bow string";
 
+    private static final String SETTINGS_PREFIX = "progressive_fletcher_";
+    private static final String DEFAULT_PROFILE = "default";
+
     private volatile boolean running = true;
 
     private String tool = KNIFE;
@@ -114,7 +126,22 @@ public class Main implements TribotScript {
 
     @Override
     public void execute(final String args) {
-        String effective = (args == null || args.trim().isEmpty()) ? showSettingsDialog() : args;
+        String effective = null;
+        if (args != null && !args.trim().isEmpty()) {
+            String name = args.trim();
+            Optional<FletcherSettings> loaded = ScriptSettings.getDefault()
+                    .load(SETTINGS_PREFIX + name, FletcherSettings.class);
+            if (loaded.isPresent()) {
+                effective = argsFromSettings(loaded.get());
+                Log.info("Loaded profile from args: '" + name + "' -> " + effective);
+            } else {
+                // Fall back: treat args as legacy fletcher arg string ("yew longbow" etc.)
+                effective = args;
+                Log.info("Args '" + name + "' not a profile; using as fletcher arg string.");
+            }
+        } else {
+            effective = showSettingsDialog();
+        }
         if (effective == null) { Log.info("Cancelled. Exiting."); return; }
         parseArgs(effective);
         Log.info("ProgressiveFletcher started. args='" + effective + "' tool=" + tool + " widgetOverride=" + widgetChildOverride);
@@ -126,14 +153,60 @@ public class Main implements TribotScript {
         Log.info("ProgressiveFletcher stopping.");
     }
 
-    private static class FletcherSettings {
+    public static class FletcherSettings {
         public String mode = "progressive"; // progressive | string | cut | string_specific
         public String wood = "yew";
         public String bowType = "longbow";
     }
 
+    private String argsFromSettings(FletcherSettings s) {
+        switch (s.mode) {
+            case "string": return "string";
+            case "cut":    return s.wood.equals("logs") ? s.bowType : s.wood + " " + s.bowType;
+            case "string_specific": return "string " + s.wood + " " + s.bowType;
+            default:       return "progressive";
+        }
+    }
+
+    // ---------- Profile helpers ----------
+
+    private List<String> getProfileNames() {
+        try {
+            return ScriptSettings.getDefault().getSaveNames().stream()
+                    .filter(n -> n.startsWith(SETTINGS_PREFIX))
+                    .map(n -> n.substring(SETTINGS_PREFIX.length()))
+                    .sorted()
+                    .collect(Collectors.toList());
+        } catch (Exception e) { return Collections.emptyList(); }
+    }
+
+    private FletcherSettings loadProfile(String name) {
+        try {
+            return ScriptSettings.getDefault()
+                    .load(SETTINGS_PREFIX + name, FletcherSettings.class)
+                    .orElseGet(FletcherSettings::new);
+        } catch (Exception e) { return new FletcherSettings(); }
+    }
+
+    private void saveProfile(String name, FletcherSettings s) {
+        try { ScriptSettings.getDefault().save(SETTINGS_PREFIX + name, s); }
+        catch (Exception e) { Log.warn("Save '" + name + "' failed: " + e.getMessage()); }
+    }
+
+    private void deleteProfile(String name) {
+        try { ScriptSettings.getDefault().delete(SETTINGS_PREFIX + name); }
+        catch (Exception e) { Log.warn("Delete '" + name + "' failed: " + e.getMessage()); }
+    }
+
+    private void refreshProfileBox(JComboBox<String> box) {
+        Object selected = box.getSelectedItem();
+        box.removeAllItems();
+        for (String n : getProfileNames()) box.addItem(n);
+        if (selected != null) box.setSelectedItem(selected);
+    }
+
     private String showSettingsDialog() {
-        final FletcherSettings cur = loadSettings();
+        final FletcherSettings cur = loadProfile(DEFAULT_PROFILE);
         final String[] result = { null };
         try {
             SwingUtilities.invokeAndWait(() -> {
@@ -147,22 +220,33 @@ public class Main implements TribotScript {
                 ButtonGroup modeGroup = new ButtonGroup();
                 modeGroup.add(rbProgCut); modeGroup.add(rbProgStr);
                 modeGroup.add(rbSpecCut); modeGroup.add(rbSpecStr);
-                switch (cur.mode) {
-                    case "string":          rbProgStr.setSelected(true); break;
-                    case "cut":             rbSpecCut.setSelected(true); break;
-                    case "string_specific": rbSpecStr.setSelected(true); break;
-                    default:                rbProgCut.setSelected(true);
-                }
 
                 JComboBox<String> woodBox = new JComboBox<>(new String[]{
                         "Logs", "Oak", "Willow", "Maple", "Yew", "Magic" });
-                woodBox.setSelectedItem(capitalize(cur.wood));
-
                 JRadioButton rbShort = new JRadioButton("Shortbow");
                 JRadioButton rbLong  = new JRadioButton("Longbow");
                 ButtonGroup typeGroup = new ButtonGroup();
                 typeGroup.add(rbShort); typeGroup.add(rbLong);
-                if ("shortbow".equals(cur.bowType)) rbShort.setSelected(true); else rbLong.setSelected(true);
+
+                Runnable populate = () -> {
+                    switch (cur.mode) {
+                        case "string":          rbProgStr.setSelected(true); break;
+                        case "cut":             rbSpecCut.setSelected(true); break;
+                        case "string_specific": rbSpecStr.setSelected(true); break;
+                        default:                rbProgCut.setSelected(true);
+                    }
+                    woodBox.setSelectedItem(capitalize(cur.wood));
+                    if ("shortbow".equals(cur.bowType)) rbShort.setSelected(true); else rbLong.setSelected(true);
+                };
+                Runnable collect = () -> {
+                    if (rbProgCut.isSelected())      cur.mode = "progressive";
+                    else if (rbProgStr.isSelected()) cur.mode = "string";
+                    else if (rbSpecCut.isSelected()) cur.mode = "cut";
+                    else if (rbSpecStr.isSelected()) cur.mode = "string_specific";
+                    cur.wood = ((String) woodBox.getSelectedItem()).toLowerCase();
+                    cur.bowType = rbShort.isSelected() ? "shortbow" : "longbow";
+                };
+                populate.run();
 
                 Runnable updateEnabled = () -> {
                     boolean specific = rbSpecCut.isSelected() || rbSpecStr.isSelected();
@@ -174,6 +258,46 @@ public class Main implements TribotScript {
                 rbSpecCut.addActionListener(e -> updateEnabled.run());
                 rbSpecStr.addActionListener(e -> updateEnabled.run());
                 updateEnabled.run();
+
+                JComboBox<String> profileBox = new JComboBox<>(getProfileNames().toArray(new String[0]));
+                JButton loadBtn = new JButton("Load");
+                JButton saveAsBtn = new JButton("Save as...");
+                JButton deleteBtn = new JButton("Delete");
+                loadBtn.addActionListener(e -> {
+                    String name = (String) profileBox.getSelectedItem();
+                    if (name == null || name.isEmpty()) return;
+                    FletcherSettings loaded = loadProfile(name);
+                    cur.mode = loaded.mode; cur.wood = loaded.wood; cur.bowType = loaded.bowType;
+                    populate.run();
+                    updateEnabled.run();
+                    Log.info("Loaded profile: " + name);
+                });
+                saveAsBtn.addActionListener(e -> {
+                    String name = JOptionPane.showInputDialog(dlg, "Profile name:", "Save Profile", JOptionPane.QUESTION_MESSAGE);
+                    if (name == null || name.trim().isEmpty()) return;
+                    name = name.trim();
+                    collect.run();
+                    saveProfile(name, cur);
+                    refreshProfileBox(profileBox);
+                    profileBox.setSelectedItem(name);
+                });
+                deleteBtn.addActionListener(e -> {
+                    String name = (String) profileBox.getSelectedItem();
+                    if (name == null || name.isEmpty()) return;
+                    int c = JOptionPane.showConfirmDialog(dlg, "Delete profile '" + name + "'?",
+                            "Confirm Delete", JOptionPane.YES_NO_OPTION);
+                    if (c == JOptionPane.YES_OPTION) {
+                        deleteProfile(name);
+                        refreshProfileBox(profileBox);
+                    }
+                });
+                JPanel profileRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+                profileRow.setBorder(BorderFactory.createTitledBorder("Profile"));
+                profileRow.add(new JLabel("Saved:"));
+                profileRow.add(profileBox);
+                profileRow.add(loadBtn);
+                profileRow.add(saveAsBtn);
+                profileRow.add(deleteBtn);
 
                 JPanel modePanel = new JPanel(new GridLayout(0, 1));
                 modePanel.setBorder(BorderFactory.createTitledBorder("Mode"));
@@ -187,26 +311,17 @@ public class Main implements TribotScript {
                 detailPanel.add(rbShort);
                 detailPanel.add(rbLong);
 
+                JPanel center = new JPanel();
+                center.setLayout(new javax.swing.BoxLayout(center, javax.swing.BoxLayout.Y_AXIS));
+                center.add(modePanel);
+                center.add(detailPanel);
+
                 JButton ok = new JButton("Start");
                 JButton cancel = new JButton("Cancel");
                 ok.addActionListener(e -> {
-                    if (rbProgCut.isSelected()) {
-                        cur.mode = "progressive"; result[0] = "progressive";
-                    } else if (rbProgStr.isSelected()) {
-                        cur.mode = "string"; result[0] = "string";
-                    } else {
-                        String wood = ((String) woodBox.getSelectedItem()).toLowerCase();
-                        String type = rbShort.isSelected() ? "shortbow" : "longbow";
-                        cur.wood = wood; cur.bowType = type;
-                        if (rbSpecCut.isSelected()) {
-                            cur.mode = "cut";
-                            result[0] = wood.equals("logs") ? type : wood + " " + type;
-                        } else {
-                            cur.mode = "string_specific";
-                            result[0] = "string " + wood + " " + type;
-                        }
-                    }
-                    saveSettings(cur);
+                    collect.run();
+                    saveProfile(DEFAULT_PROFILE, cur);
+                    result[0] = argsFromSettings(cur);
                     dlg.dispose();
                 });
                 cancel.addActionListener(e -> dlg.dispose());
@@ -215,8 +330,8 @@ public class Main implements TribotScript {
                 buttonPanel.add(ok); buttonPanel.add(cancel);
 
                 dlg.setLayout(new BorderLayout());
-                dlg.add(modePanel, BorderLayout.NORTH);
-                dlg.add(detailPanel, BorderLayout.CENTER);
+                dlg.add(profileRow, BorderLayout.NORTH);
+                dlg.add(center, BorderLayout.CENTER);
                 dlg.add(buttonPanel, BorderLayout.SOUTH);
                 dlg.pack();
                 dlg.setLocationRelativeTo(null);
@@ -227,21 +342,6 @@ public class Main implements TribotScript {
             return null;
         }
         return result[0];
-    }
-
-    private FletcherSettings loadSettings() {
-        try {
-            return ScriptSettings.getDefault()
-                    .load("progressive_fletcher", FletcherSettings.class)
-                    .orElseGet(FletcherSettings::new);
-        } catch (Exception e) {
-            return new FletcherSettings();
-        }
-    }
-
-    private void saveSettings(FletcherSettings s) {
-        try { ScriptSettings.getDefault().save("progressive_fletcher", s); }
-        catch (Exception e) { Log.warn("Failed to save settings: " + e.getMessage()); }
     }
 
     private void parseArgs(String args) {
