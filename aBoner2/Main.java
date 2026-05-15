@@ -30,16 +30,26 @@ import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.awt.Frame;
+import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.2.0 (2026-05-14) - Multi-profile save/load. GUI gains a Profile row at the top
+ *                        with dropdown + Load / Save as... / Delete buttons. Profiles
+ *                        namespaced under "a_boner_<name>" in ScriptSettings.
+ *                        execute(args): if args matches a saved profile, load it and
+ *                        skip dialog. If not a profile, fall back to treating args as
+ *                        a bone name override (preserves prior CLI behavior).
  *   1.1.0 (2026-05-14) - PKer panic-escape: if Combat.getAttackingPlayer() is present
  *                        while in wilderness, ring-tele to GE immediately. If
  *                        teleblocked, walk south toward GE (best effort).
@@ -95,6 +105,9 @@ public class Main implements TribotScript {
     private static final String AMULET_NAME = "Burning amulet(";
     private static final String RING_NAME = "Ring of wealth (";
 
+    private static final String SETTINGS_PREFIX = "a_boner_";
+    private static final String DEFAULT_PROFILE = "default";
+
     private volatile boolean running = true;
     private long lastProgressMs = System.currentTimeMillis();
     private static final long STUCK_TIMEOUT_MS = 5 * 60_000;
@@ -107,8 +120,21 @@ public class Main implements TribotScript {
 
     @Override
     public void execute(final String args) {
-        if (args != null && !args.trim().isEmpty()) boneName = args.trim();
-        else if (!showSettingsDialog()) { Log.info("Cancelled. Exiting."); return; }
+        if (args != null && !args.trim().isEmpty()) {
+            String name = args.trim();
+            Optional<BonerSettings> loaded = ScriptSettings.getDefault()
+                    .load(SETTINGS_PREFIX + name, BonerSettings.class);
+            if (loaded.isPresent()) {
+                applySettings(loaded.get());
+                Log.info("Loaded profile from args: '" + name + "'");
+            } else {
+                // Backwards-compatible: treat args as a bone name override.
+                boneName = name;
+                Log.info("Args '" + name + "' not a profile; using as bone name.");
+            }
+        } else {
+            if (!showSettingsDialog()) { Log.info("Cancelled. Exiting."); return; }
+        }
 
         Log.info("aBoner started. Bone=" + boneName);
         Antiban.setScriptAiAntibanEnabled(true);
@@ -320,27 +346,127 @@ public class Main implements TribotScript {
         }
     }
 
-    private static class BonerSettings {
+    public static class BonerSettings {
         public String boneName = "Dragon bones";
         public boolean hopBetweenTrips = false;
         public boolean panicOnAttack = true;
     }
 
+    private void applySettings(BonerSettings s) {
+        boneName = s.boneName;
+        hopBetweenTrips = s.hopBetweenTrips;
+        panicOnAttack = s.panicOnAttack;
+    }
+
+    private BonerSettings collectSettings() {
+        BonerSettings s = new BonerSettings();
+        s.boneName = boneName;
+        s.hopBetweenTrips = hopBetweenTrips;
+        s.panicOnAttack = panicOnAttack;
+        return s;
+    }
+
+    // ---------- Profile helpers ----------
+
+    private List<String> getProfileNames() {
+        try {
+            return ScriptSettings.getDefault().getSaveNames().stream()
+                    .filter(n -> n.startsWith(SETTINGS_PREFIX))
+                    .map(n -> n.substring(SETTINGS_PREFIX.length()))
+                    .sorted()
+                    .collect(Collectors.toList());
+        } catch (Exception e) { return Collections.emptyList(); }
+    }
+
+    private BonerSettings loadProfile(String name) {
+        try {
+            return ScriptSettings.getDefault()
+                    .load(SETTINGS_PREFIX + name, BonerSettings.class)
+                    .orElseGet(BonerSettings::new);
+        } catch (Exception e) { return new BonerSettings(); }
+    }
+
+    private void saveProfile(String name, BonerSettings s) {
+        try { ScriptSettings.getDefault().save(SETTINGS_PREFIX + name, s); }
+        catch (Exception e) { Log.warn("Save '" + name + "' failed: " + e.getMessage()); }
+    }
+
+    private void deleteProfile(String name) {
+        try { ScriptSettings.getDefault().delete(SETTINGS_PREFIX + name); }
+        catch (Exception e) { Log.warn("Delete '" + name + "' failed: " + e.getMessage()); }
+    }
+
+    private void refreshProfileBox(JComboBox<String> box) {
+        Object selected = box.getSelectedItem();
+        box.removeAllItems();
+        for (String n : getProfileNames()) box.addItem(n);
+        if (selected != null) box.setSelectedItem(selected);
+    }
+
     private boolean showSettingsDialog() {
-        final BonerSettings cur = loadSettings();
-        boneName = cur.boneName;
-        hopBetweenTrips = cur.hopBetweenTrips;
-        panicOnAttack = cur.panicOnAttack;
+        final BonerSettings initial = loadProfile(DEFAULT_PROFILE);
+        applySettings(initial);
         final boolean[] ok = { false };
         try {
             SwingUtilities.invokeAndWait(() -> {
                 JDialog dlg = new JDialog((Frame) null, "aBoner", true);
                 dlg.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+
                 JComboBox<String> boneBox = new JComboBox<>(new String[]{
                         "Dragon bones", "Big bones", "Superior dragon bones" });
-                boneBox.setSelectedItem(cur.boneName);
-                JCheckBox cbHop = new JCheckBox("Hop worlds between trips", cur.hopBetweenTrips);
-                JCheckBox cbPanic = new JCheckBox("Panic-tele via ring on PKer attack", cur.panicOnAttack);
+                JCheckBox cbHop = new JCheckBox("Hop worlds between trips");
+                JCheckBox cbPanic = new JCheckBox("Panic-tele via ring on PKer attack");
+                JComboBox<String> profileBox = new JComboBox<>(getProfileNames().toArray(new String[0]));
+
+                Runnable populate = () -> {
+                    boneBox.setSelectedItem(boneName);
+                    cbHop.setSelected(hopBetweenTrips);
+                    cbPanic.setSelected(panicOnAttack);
+                };
+                Runnable collect = () -> {
+                    boneName = (String) boneBox.getSelectedItem();
+                    hopBetweenTrips = cbHop.isSelected();
+                    panicOnAttack = cbPanic.isSelected();
+                };
+                populate.run();
+
+                // --- Profile row ---
+                JButton loadBtn = new JButton("Load");
+                JButton saveAsBtn = new JButton("Save as...");
+                JButton deleteBtn = new JButton("Delete");
+                loadBtn.addActionListener(e -> {
+                    String name = (String) profileBox.getSelectedItem();
+                    if (name == null || name.isEmpty()) return;
+                    applySettings(loadProfile(name));
+                    populate.run();
+                    Log.info("Loaded profile: " + name);
+                });
+                saveAsBtn.addActionListener(e -> {
+                    String name = JOptionPane.showInputDialog(dlg, "Profile name:", "Save Profile", JOptionPane.QUESTION_MESSAGE);
+                    if (name == null || name.trim().isEmpty()) return;
+                    name = name.trim();
+                    collect.run();
+                    saveProfile(name, collectSettings());
+                    refreshProfileBox(profileBox);
+                    profileBox.setSelectedItem(name);
+                });
+                deleteBtn.addActionListener(e -> {
+                    String name = (String) profileBox.getSelectedItem();
+                    if (name == null || name.isEmpty()) return;
+                    int c = JOptionPane.showConfirmDialog(dlg, "Delete profile '" + name + "'?",
+                            "Confirm Delete", JOptionPane.YES_NO_OPTION);
+                    if (c == JOptionPane.YES_OPTION) {
+                        deleteProfile(name);
+                        refreshProfileBox(profileBox);
+                    }
+                });
+                JPanel profileRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+                profileRow.setBorder(BorderFactory.createTitledBorder("Profile"));
+                profileRow.add(new JLabel("Saved:"));
+                profileRow.add(profileBox);
+                profileRow.add(loadBtn);
+                profileRow.add(saveAsBtn);
+                profileRow.add(deleteBtn);
 
                 JPanel boneP = new JPanel(new FlowLayout(FlowLayout.LEFT));
                 boneP.setBorder(BorderFactory.createTitledBorder("Bones"));
@@ -361,13 +487,8 @@ public class Main implements TribotScript {
                 JButton start = new JButton("Start");
                 JButton cancel = new JButton("Cancel");
                 start.addActionListener(e -> {
-                    cur.boneName = (String) boneBox.getSelectedItem();
-                    cur.hopBetweenTrips = cbHop.isSelected();
-                    cur.panicOnAttack = cbPanic.isSelected();
-                    boneName = cur.boneName;
-                    hopBetweenTrips = cur.hopBetweenTrips;
-                    panicOnAttack = cur.panicOnAttack;
-                    saveSettings(cur);
+                    collect.run();
+                    saveProfile(DEFAULT_PROFILE, collectSettings());
                     ok[0] = true; dlg.dispose();
                 });
                 cancel.addActionListener(e -> dlg.dispose());
@@ -375,24 +496,12 @@ public class Main implements TribotScript {
                 btns.add(start); btns.add(cancel);
 
                 dlg.setLayout(new BorderLayout());
+                dlg.add(profileRow, BorderLayout.NORTH);
                 dlg.add(center, BorderLayout.CENTER);
                 dlg.add(btns, BorderLayout.SOUTH);
                 dlg.pack(); dlg.setLocationRelativeTo(null); dlg.setVisible(true);
             });
         } catch (Exception e) { Log.error("Settings dialog failed: " + e.getMessage()); return false; }
         return ok[0];
-    }
-
-    private BonerSettings loadSettings() {
-        try {
-            return ScriptSettings.getDefault()
-                    .load("a_boner", BonerSettings.class)
-                    .orElseGet(BonerSettings::new);
-        } catch (Exception e) { return new BonerSettings(); }
-    }
-
-    private void saveSettings(BonerSettings s) {
-        try { ScriptSettings.getDefault().save("a_boner", s); }
-        catch (Exception e) { Log.warn("Failed to save settings: " + e.getMessage()); }
     }
 }
