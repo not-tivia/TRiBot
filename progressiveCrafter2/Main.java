@@ -21,16 +21,25 @@ import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.awt.Frame;
+import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.1.0 (2026-05-14) - Multi-profile save/load. GUI gains Profile row at the top
+ *                        (dropdown + Load / Save as... / Delete). Profiles namespaced
+ *                        under "progressive_crafter_<name>" in ScriptSettings.
+ *                        execute(args): if args matches a saved profile, load it and
+ *                        skip dialog. Otherwise show dialog with "default" pre-loaded.
  *   1.0.0 (2026-05-14) - Initial modern rewrite of progressiveCrafter using current SDK.
  *                        State machine + widget-based make-X clicking (270.15-20).
  *                        Selective deposit (keep needle/thread/leather, deposit rest).
@@ -71,12 +80,28 @@ public class Main implements TribotScript {
     // Long enough to survive TRiBot AI antiban breaks (which can last several minutes).
     private static final long STUCK_TIMEOUT_MS = 5 * 60_000;
 
+    private static final String SETTINGS_PREFIX = "progressive_crafter_";
+    private static final String DEFAULT_PROFILE = "default";
+
     private int childOverride = -1; // -1 = auto (use childForLevel)
     private String itemOverrideName = null;
 
     @Override
     public void execute(final String args) {
-        if (!showSettingsDialog()) { Log.info("Cancelled. Exiting."); return; }
+        if (args != null && !args.trim().isEmpty()) {
+            String name = args.trim();
+            Optional<CrafterSettings> loaded = ScriptSettings.getDefault()
+                    .load(SETTINGS_PREFIX + name, CrafterSettings.class);
+            if (loaded.isPresent()) {
+                applySettings(loaded.get());
+                Log.info("Loaded profile from args: '" + name + "'");
+            } else {
+                Log.warn("No profile named '" + name + "'; showing dialog.");
+                if (!showSettingsDialog()) { Log.info("Cancelled. Exiting."); return; }
+            }
+        } else {
+            if (!showSettingsDialog()) { Log.info("Cancelled. Exiting."); return; }
+        }
         Log.info("ProgressiveCrafter started. item=" + (itemOverrideName == null ? "auto" : itemOverrideName));
         Antiban.setScriptAiAntibanEnabled(true);
 
@@ -243,7 +268,7 @@ public class Main implements TribotScript {
         return "Leather chaps";
     }
 
-    private static class CrafterSettings {
+    public static class CrafterSettings {
         public String item = "auto"; // auto | gloves | boots | cowl | vambraces | body | chaps
     }
 
@@ -253,8 +278,67 @@ public class Main implements TribotScript {
             "Leather vambraces", "Leather body", "Leather chaps" };
     private static final int[] ITEM_CHILD = { -1, 15, 16, 17, 18, 19, 20 };
 
+    private String currentItemKey = "auto";
+
+    private void applySettings(CrafterSettings s) {
+        currentItemKey = s.item;
+        int idx = 0;
+        for (int i = 0; i < ITEM_KEYS.length; i++) if (ITEM_KEYS[i].equals(s.item)) { idx = i; break; }
+        if (idx > 0) {
+            childOverride = ITEM_CHILD[idx];
+            itemOverrideName = ITEM_LABELS[idx];
+        } else {
+            childOverride = -1;
+            itemOverrideName = null;
+        }
+    }
+
+    private CrafterSettings collectSettings() {
+        CrafterSettings s = new CrafterSettings();
+        s.item = currentItemKey;
+        return s;
+    }
+
+    // ---------- Profile helpers ----------
+
+    private List<String> getProfileNames() {
+        try {
+            return ScriptSettings.getDefault().getSaveNames().stream()
+                    .filter(n -> n.startsWith(SETTINGS_PREFIX))
+                    .map(n -> n.substring(SETTINGS_PREFIX.length()))
+                    .sorted()
+                    .collect(Collectors.toList());
+        } catch (Exception e) { return Collections.emptyList(); }
+    }
+
+    private CrafterSettings loadProfile(String name) {
+        try {
+            return ScriptSettings.getDefault()
+                    .load(SETTINGS_PREFIX + name, CrafterSettings.class)
+                    .orElseGet(CrafterSettings::new);
+        } catch (Exception e) { return new CrafterSettings(); }
+    }
+
+    private void saveProfile(String name, CrafterSettings s) {
+        try { ScriptSettings.getDefault().save(SETTINGS_PREFIX + name, s); }
+        catch (Exception e) { Log.warn("Save '" + name + "' failed: " + e.getMessage()); }
+    }
+
+    private void deleteProfile(String name) {
+        try { ScriptSettings.getDefault().delete(SETTINGS_PREFIX + name); }
+        catch (Exception e) { Log.warn("Delete '" + name + "' failed: " + e.getMessage()); }
+    }
+
+    private void refreshProfileBox(JComboBox<String> box) {
+        Object selected = box.getSelectedItem();
+        box.removeAllItems();
+        for (String n : getProfileNames()) box.addItem(n);
+        if (selected != null) box.setSelectedItem(selected);
+    }
+
     private boolean showSettingsDialog() {
-        final CrafterSettings cur = loadSettings();
+        final CrafterSettings initial = loadProfile(DEFAULT_PROFILE);
+        applySettings(initial);
         final boolean[] ok = { false };
         try {
             SwingUtilities.invokeAndWait(() -> {
@@ -262,9 +346,54 @@ public class Main implements TribotScript {
                 dlg.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
 
                 JComboBox<String> itemBox = new JComboBox<>(ITEM_LABELS);
-                int idx = 0;
-                for (int i = 0; i < ITEM_KEYS.length; i++) if (ITEM_KEYS[i].equals(cur.item)) { idx = i; break; }
-                itemBox.setSelectedIndex(idx);
+                JComboBox<String> profileBox = new JComboBox<>(getProfileNames().toArray(new String[0]));
+
+                Runnable populate = () -> {
+                    int idx = 0;
+                    for (int i = 0; i < ITEM_KEYS.length; i++) if (ITEM_KEYS[i].equals(currentItemKey)) { idx = i; break; }
+                    itemBox.setSelectedIndex(idx);
+                };
+                Runnable collect = () -> {
+                    currentItemKey = ITEM_KEYS[itemBox.getSelectedIndex()];
+                };
+                populate.run();
+
+                JButton loadBtn = new JButton("Load");
+                JButton saveAsBtn = new JButton("Save as...");
+                JButton deleteBtn = new JButton("Delete");
+                loadBtn.addActionListener(e -> {
+                    String name = (String) profileBox.getSelectedItem();
+                    if (name == null || name.isEmpty()) return;
+                    applySettings(loadProfile(name));
+                    populate.run();
+                    Log.info("Loaded profile: " + name);
+                });
+                saveAsBtn.addActionListener(e -> {
+                    String name = JOptionPane.showInputDialog(dlg, "Profile name:", "Save Profile", JOptionPane.QUESTION_MESSAGE);
+                    if (name == null || name.trim().isEmpty()) return;
+                    name = name.trim();
+                    collect.run();
+                    saveProfile(name, collectSettings());
+                    refreshProfileBox(profileBox);
+                    profileBox.setSelectedItem(name);
+                });
+                deleteBtn.addActionListener(e -> {
+                    String name = (String) profileBox.getSelectedItem();
+                    if (name == null || name.isEmpty()) return;
+                    int c = JOptionPane.showConfirmDialog(dlg, "Delete profile '" + name + "'?",
+                            "Confirm Delete", JOptionPane.YES_NO_OPTION);
+                    if (c == JOptionPane.YES_OPTION) {
+                        deleteProfile(name);
+                        refreshProfileBox(profileBox);
+                    }
+                });
+                JPanel profileRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
+                profileRow.setBorder(BorderFactory.createTitledBorder("Profile"));
+                profileRow.add(new JLabel("Saved:"));
+                profileRow.add(profileBox);
+                profileRow.add(loadBtn);
+                profileRow.add(saveAsBtn);
+                profileRow.add(deleteBtn);
 
                 JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT));
                 panel.setBorder(BorderFactory.createTitledBorder("Item to craft"));
@@ -274,13 +403,9 @@ public class Main implements TribotScript {
                 JButton start = new JButton("Start");
                 JButton cancel = new JButton("Cancel");
                 start.addActionListener(e -> {
-                    int i = itemBox.getSelectedIndex();
-                    cur.item = ITEM_KEYS[i];
-                    if (i > 0) {
-                        childOverride = ITEM_CHILD[i];
-                        itemOverrideName = ITEM_LABELS[i];
-                    }
-                    saveSettings(cur);
+                    collect.run();
+                    applySettings(collectSettings());
+                    saveProfile(DEFAULT_PROFILE, collectSettings());
                     ok[0] = true;
                     dlg.dispose();
                 });
@@ -290,6 +415,7 @@ public class Main implements TribotScript {
                 buttons.add(start); buttons.add(cancel);
 
                 dlg.setLayout(new BorderLayout());
+                dlg.add(profileRow, BorderLayout.NORTH);
                 dlg.add(panel, BorderLayout.CENTER);
                 dlg.add(buttons, BorderLayout.SOUTH);
                 dlg.pack();
@@ -301,20 +427,5 @@ public class Main implements TribotScript {
             return false;
         }
         return ok[0];
-    }
-
-    private CrafterSettings loadSettings() {
-        try {
-            return ScriptSettings.getDefault()
-                    .load("progressive_crafter", CrafterSettings.class)
-                    .orElseGet(CrafterSettings::new);
-        } catch (Exception e) {
-            return new CrafterSettings();
-        }
-    }
-
-    private void saveSettings(CrafterSettings s) {
-        try { ScriptSettings.getDefault().save("progressive_crafter", s); }
-        catch (Exception e) { Log.warn("Failed to save settings: " + e.getMessage()); }
     }
 }
