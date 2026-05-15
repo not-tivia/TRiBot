@@ -426,3 +426,154 @@ public class Main implements TribotScript { ... }
 The same block can grow over time. Don't delete old CHANGELOG entries — they're history.
 KNOWN-FIX entries can be pruned if a class of bug becomes irrelevant (e.g. SDK API
 change makes the workaround unnecessary).
+
+---
+
+## 17. Profile System + Args
+
+Every interactive script should support **both** a Swing settings dialog with multi-profile
+save/load **and** an `execute(String args)` arg that loads a named profile to skip the
+dialog. Deployed across progressiveCrafter2, progressiveFletcher3, aBowStringer2,
+aBoner2, and aLooter MainSwing — all share the same shape.
+
+### Naming convention
+
+Each script picks a unique settings prefix:
+
+```java
+private static final String SETTINGS_PREFIX = "progressive_crafter_";
+private static final String DEFAULT_PROFILE = "default";
+```
+
+All profiles are stored in `ScriptSettings.getDefault()` under
+`<SETTINGS_PREFIX><profileName>`. This namespaces profiles per script so the shared
+saves directory doesn't collide.
+
+### Helper methods (copy-paste, change the `Settings` type)
+
+```java
+private List<String> getProfileNames() {
+    try {
+        return ScriptSettings.getDefault().getSaveNames().stream()
+                .filter(n -> n.startsWith(SETTINGS_PREFIX))
+                .map(n -> n.substring(SETTINGS_PREFIX.length()))
+                .sorted()
+                .collect(Collectors.toList());
+    } catch (Exception e) { return Collections.emptyList(); }
+}
+
+private MySettings loadProfile(String name) {
+    try {
+        return ScriptSettings.getDefault()
+                .load(SETTINGS_PREFIX + name, MySettings.class)
+                .orElseGet(MySettings::new);
+    } catch (Exception e) { return new MySettings(); }
+}
+
+private void saveProfile(String name, MySettings s) {
+    try { ScriptSettings.getDefault().save(SETTINGS_PREFIX + name, s); }
+    catch (Exception e) { Log.warn("Save '" + name + "' failed: " + e.getMessage()); }
+}
+
+private void deleteProfile(String name) {
+    try { ScriptSettings.getDefault().delete(SETTINGS_PREFIX + name); }
+    catch (Exception e) { Log.warn("Delete '" + name + "' failed: " + e.getMessage()); }
+}
+
+private void refreshProfileBox(JComboBox<String> box) {
+    Object selected = box.getSelectedItem();
+    box.removeAllItems();
+    for (String n : getProfileNames()) box.addItem(n);
+    if (selected != null) box.setSelectedItem(selected);
+}
+```
+
+### Dialog: profile row + populate/collect runnables
+
+The dialog uses two `Runnable`s to bridge the form fields and the settings struct:
+
+- `populate.run()` writes settings → form (for "Load" button)
+- `collect.run()` reads form → settings (for Save / Start)
+
+This avoids needing a separate `Form` class for small dialogs. For larger dialogs
+(aLooter has 7+ tabs), a `Form` inner class with `populateFrom(Settings)` /
+`collect(): Settings` methods is cleaner.
+
+Profile row UI:
+
+```java
+JComboBox<String> profileBox = new JComboBox<>(getProfileNames().toArray(new String[0]));
+JButton loadBtn = new JButton("Load");
+JButton saveAsBtn = new JButton("Save as...");
+JButton deleteBtn = new JButton("Delete");
+loadBtn.addActionListener(e -> {
+    String name = (String) profileBox.getSelectedItem();
+    if (name == null || name.isEmpty()) return;
+    applySettings(loadProfile(name));
+    populate.run();
+});
+saveAsBtn.addActionListener(e -> {
+    String name = JOptionPane.showInputDialog(dlg, "Profile name:", "Save Profile",
+            JOptionPane.QUESTION_MESSAGE);
+    if (name == null || name.trim().isEmpty()) return;
+    collect.run();
+    saveProfile(name.trim(), collectSettings());
+    refreshProfileBox(profileBox);
+    profileBox.setSelectedItem(name.trim());
+});
+deleteBtn.addActionListener(e -> {
+    String name = (String) profileBox.getSelectedItem();
+    if (name == null || name.isEmpty()) return;
+    int c = JOptionPane.showConfirmDialog(dlg, "Delete profile '" + name + "'?",
+            "Confirm Delete", JOptionPane.YES_NO_OPTION);
+    if (c == JOptionPane.YES_OPTION) { deleteProfile(name); refreshProfileBox(profileBox); }
+});
+```
+
+The profile row goes in `BorderLayout.NORTH`, the tabs/content in `CENTER`, and the
+Start/Cancel buttons in `SOUTH`. The Start handler auto-saves to `DEFAULT_PROFILE`:
+
+```java
+start.addActionListener(e -> {
+    collect.run();
+    saveProfile(DEFAULT_PROFILE, collectSettings());
+    ok[0] = true; dlg.dispose();
+});
+```
+
+### Args = profile name (with backward compat)
+
+```java
+@Override
+public void execute(final String args) {
+    if (args != null && !args.trim().isEmpty()) {
+        String name = args.trim();
+        Optional<MySettings> loaded = ScriptSettings.getDefault()
+                .load(SETTINGS_PREFIX + name, MySettings.class);
+        if (loaded.isPresent()) {
+            applySettings(loaded.get());
+            Log.info("Loaded profile from args: '" + name + "'");
+        } else {
+            // Fall back to script-specific arg parsing (or show dialog).
+            // - aBoner2: treat as bone name override
+            // - progressiveFletcher3: parseArgs(name) handles "yew longbow" etc.
+            // - aBowStringer2: treat as "flax"/"wool"/"auto"
+            // - progressiveCrafter2 / aLooter: show dialog
+            ...
+        }
+    } else {
+        if (!showSettingsDialog()) return;
+    }
+    // ... rest of execute
+}
+```
+
+### Why the runtime "Start" saves to `default`
+
+Subtle but useful: every Start writes the current form state to `<prefix>default`.
+Next time the script runs with no args, the dialog opens with the last-used config
+pre-populated. This means a user who never explicitly saves a named profile still
+gets their last config restored automatically.
+
+`Save as...` is only needed when keeping *multiple* named configs (e.g. one profile for
+spider eggs, another for Falador mines, another for cabbage looting).
