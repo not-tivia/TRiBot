@@ -21,6 +21,33 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.23 (2026-05-16) - Three fixes after the 1.9.22 test:
+ *                         (a) Bot stopped attacking Corp after the
+ *                             Elder maul -> Arclight phase rotation.
+ *                             Pre-1.9.23 the re-engage gate was
+ *                             "if (!isPlayerInCombat()) attack" — but
+ *                             isPlayerInCombat is true whenever Corp
+ *                             hits us, even if we aren't attacking
+ *                             back. With Arclight equipped (1H), the
+ *                             bot ended up in combat (taking hits) but
+ *                             not actually swinging at Corp; spec
+ *                             never fired and Corp died of teammate
+ *                             damage. Now uses isPlayerAttackingCorp
+ *                             which checks our actual interaction
+ *                             target, not just combat tag.
+ *                         (b) equipSpecWeapon now also equips a
+ *                             defender after wielding a 1H spec weapon
+ *                             (Arclight, Darklight, Emberlight, Dragon
+ *                             halberd). 2H weapons (Elder maul, DWH,
+ *                             BGS, Crystal halberd) take the offhand
+ *                             slot themselves so we skip defender for
+ *                             those.
+ *                         (c) Close-bank-before-tele extended to
+ *                             teleportToFeroxEnclave and the house tab
+ *                             tele (in addition to handleTravelingToCorp
+ *                             which got the fix in 1.9.22). All
+ *                             inventory-item tele clicks now close the
+ *                             bank first.
  *   1.9.22 (2026-05-16) - Three behavior fixes:
  *                         (a) No more emergency-escape just because the
  *                             teammate isn't visible. Teammates can walk
@@ -2172,6 +2199,16 @@ public class Corp implements TribotScript {
 				boolean success = Waiting.waitUntil(3000, () -> isSpecWeaponEquipped());
 				if (success) {
 					Log.info("Successfully equipped spec weapon: " + chosenSpecWeapon);
+					// 1.9.23: if we just wielded a 1H spec weapon (Arclight,
+					// Darklight, Emberlight, Dragon halberd), the offhand
+					// slot is empty — equip a defender for the tank stats.
+					// 2H specs (Elder maul, DWH, BGS, Crystal halberd) take
+					// the offhand slot themselves so we skip the defender
+					// for those.
+					if (!isTwoHandedSpec(chosenSpecWeapon) && !hasDefenderEquipped()) {
+						Log.info("1H spec weapon equipped — adding defender");
+						equipAnyDefender();
+					}
 				} else {
 					Log.error("Failed to equip spec weapon: " + chosenSpecWeapon);
 				}
@@ -2987,8 +3024,15 @@ public class Corp implements TribotScript {
             }
             corpWasAliveLastCheck = corpCurrentlyAlive;
 
-            // Re-engage if not in combat
-            if (!isPlayerInCombat()) {
+            // 1.9.23: re-engage if we're not ATTACKING Corp specifically.
+            // Pre-1.9.23 we only re-attacked when isPlayerInCombat() was
+            // false — but isPlayerInCombat is true whenever Corp hits us,
+            // even if WE aren't attacking back. Production log showed
+            // Arclight pre-activated, Corp hitting us, but no attack from
+            // our side → no XP, no spec fire, no damage. Bot stood there
+            // until Corp died of teammate damage. Now we check
+            // isPlayerAttackingCorp specifically.
+            if (!isPlayerAttackingCorp(corp)) {
                 corp.interact("Attack");
             }
 
@@ -6231,6 +6275,15 @@ public class Corp implements TribotScript {
     private boolean teleportToFeroxEnclave() {
         Log.info("Attempting to teleport to Ferox Enclave...");
 
+        // 1.9.23: close bank if open — same fix as handleTravelingToCorp.
+        // Bank intercepts inventory item clicks while open, so Ring of
+        // Dueling left-click opens a quantity prompt instead of teleporting.
+        if (Bank.isOpen()) {
+            Log.info("Bank still open — closing before Ferox tele");
+            Bank.close();
+            Waiting.waitUntil(2000, () -> !Bank.isOpen());
+        }
+
         // Look for ring of dueling
         Optional<InventoryItem> ringOpt = Query.inventory()
                 .nameContains("Ring of dueling")
@@ -8267,6 +8320,13 @@ public class Corp implements TribotScript {
 
 	private boolean teleportToHouse() {
 		Log.info("Teleporting to house using house tab...");
+
+		// 1.9.23: close bank if open before clicking the house tab.
+		if (Bank.isOpen()) {
+			Log.info("Bank still open — closing before house tele");
+			Bank.close();
+			Waiting.waitUntil(2000, () -> !Bank.isOpen());
+		}
 
 		Optional<InventoryItem> houseTabOpt = Query.inventory()
 				.nameEquals("Teleport to house")
