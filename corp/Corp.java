@@ -5508,8 +5508,7 @@ public class Corp implements TribotScript {
 			// LocalWalking-walked directly to the target — RuneScape's
 			// L-shape pathing then routed through Corp's tile and the
 			// bot took stomp damage. Now we route via a waypoint on the
-			// player's side of Corp first.
-			WorldTile myPos = MyPlayer.getTile();
+			// player's side of Corp first. (myPos already declared above.)
 			Area corpArea = corp.getArea();
 			if (myPos != null && lineCrossesCorp(myPos, bestPosition, corpArea)) {
 				WorldTile waypoint = pickWaypointAroundCorp(myPos, bestPosition, corp);
