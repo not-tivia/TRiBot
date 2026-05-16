@@ -2898,23 +2898,15 @@ public class Corp implements TribotScript {
     }
 
     private void handleProtectionPrayers() {
-        Optional<Npc> corpOpt = Query.npcs().nameEquals(CORPOREAL_BEAST).findFirst();
-        if (!corpOpt.isPresent()) return;
-
-        Npc corp = corpOpt.get();
-
-        // Check if Corp is targeting us
-        if (isCorpTargetingUs(corp)) {
-            if (!Prayer.PROTECT_FROM_MELEE.isEnabled()) {
-                Log.info("Corp targeting us - activating Protect from Melee");
-                Prayer.PROTECT_FROM_MELEE.enable();
-            }
-        } else {
-            // Corp not targeting us, can use offensive prayers
-            if (!Prayer.PROTECT_FROM_MAGIC.isEnabled()) {
-                Log.info("Corp targeting us - activating Protect from Melee");
-                Prayer.PROTECT_FROM_MAGIC.enable();
-            }
+        // 1.9.33: no more prayer switching. User: "we want protect from
+        // magic only." Pre-1.9.33 the bot toggled between Protect-Melee
+        // and Protect-Magic based on whether Corp was targeting us — a
+        // false economy because the wrong-prayer ticks let big hits
+        // through. Always Protect from Magic now; eating handles the
+        // melee chip damage.
+        if (!Prayer.PROTECT_FROM_MAGIC.isEnabled()) {
+            Log.info("Activating Protect from Magic");
+            Prayer.PROTECT_FROM_MAGIC.enable();
         }
     }
 
@@ -9713,7 +9705,16 @@ public class Corp implements TribotScript {
         List<String> owned = getOwnedSpecWeapons();
         for (String w : preference[phase]) {
             if (!owned.contains(w)) continue;
-            if (Inventory.contains(new String[]{ w })) return w;
+            // 1.9.33: check Equipment as well as Inventory. Pre-1.9.33 we
+            // only checked Inventory.contains, so if the spec weapon was
+            // already EQUIPPED (e.g. after lobby prep), this returned null
+            // → refreshSpecWeaponForPhase returned false → handleSpecialAttack
+            // bailed with "No usable spec weapon" → bot swapped to Fang
+            // and never specced. Now we count the weapon as usable whether
+            // it's in inventory or already on the player.
+            if (Inventory.contains(new String[]{ w }) || Equipment.contains(w)) {
+                return w;
+            }
         }
         return null;
     }
