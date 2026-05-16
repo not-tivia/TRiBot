@@ -21,6 +21,61 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.8.8 (2026-05-16) - Restoration model rebuilt to match real Corp meta:
+ *                        spec → POH → spec → POH until phase targets met or
+ *                        Corp HP drops below the floor (a teammate is
+ *                        actively damaging it). Pre-1.8.8 the bot would spec
+ *                        once per kill and never tele to POH for more.
+ *                        Changes:
+ *                        (a) Restoration is now PER-KILL, not per-trip.
+ *                            resetRestorationTracking() runs at the end of
+ *                            handleLooting() so every new kill starts with a
+ *                            fresh cycle budget and zero spec counters. Phase
+ *                            aggregator counters were already per-kill via
+ *                            coordinatorOnKillEnded().
+ *                        (b) shouldStartRestorationCycle() gate rewritten:
+ *                            triggers when spec is DEPLETED (was inverted —
+ *                            pre-1.8.8 required percent >= minSpecEnergy,
+ *                            backwards) AND phase targets not met AND Corp
+ *                            HP above floor. totalRestorationCycles is now
+ *                            just a safety upper bound (default 10), not the
+ *                            real loop driver.
+ *                        (c) Mid-fight restoration trigger added to
+ *                            handleFightingCorp — once spec is dry in
+ *                            combat, the bot breaks out to POH instead of
+ *                            standing there meleeing with no spec. Loop
+ *                            naturally terminates when teamPhaseNeeded()==0
+ *                            or Corp HP drops below corpMinHpForSpec (a real
+ *                            teammate is killing it — go melee and help).
+ *                        (d) corpMinHpForSpec default 600 → 1700. This is
+ *                            the restoration-loop termination floor, not a
+ *                            per-spec cooldown. Stats stay reduced; only HP
+ *                            regens. 1700 ≈ Corp lost ~15% HP → time to
+ *                            stop dumping defense-reducers and join melee.
+ *                        (e) INTERNAL_SPECS_PER_CYCLE (hardcoded 2) replaced
+ *                            with specsPerFullBar() which derives from the
+ *                            cheapest owned spec weapon's cost. Arclight
+ *                            (25%) now correctly fits 4 specs per cycle
+ *                            instead of being clipped at 2.
+ *                        (f) assignUniqueCorpPosition() now factors in self-
+ *                            distance. Pre-1.8.8 it only weighted "max
+ *                            separation from other players", so when no
+ *                            teammates were nearby it just picked the first
+ *                            safe offset in iteration order (East). With a
+ *                            NW approach to Corp, picking East routed the
+ *                            player under Corp's hitbox. Now picks the
+ *                            closest safe offset on tie.
+ *                        (g) Mid-fight repositioning. handleCorpPositioning()
+ *                            was a defined-but-never-called method, so the
+ *                            bot picked one tile at engage and stayed there
+ *                            for the entire kill. When Corp roamed (esp.
+ *                            through narrow corners) the player ended up
+ *                            inside Corp's 5x5 hitbox taking free stomp
+ *                            damage. handleFightingCorp now has two checks
+ *                            at the top: (i) emergency reposition if
+ *                            corpArea.contains(myTile), (ii) periodic 3s
+ *                            reposition if isInGoodCorpPosition returns
+ *                            false (drifted from assigned offset).
  *   1.8.7 (2026-05-15) - Spec rotation finally works when joining an in-progress
  *                        teammate kill. Three coupled bugs in the entering-
  *                        combat path:
@@ -531,7 +586,8 @@ public class Corp implements TribotScript {
     public static final int INTERNAL_CORP_LOW_HP_VENG_STOP = 85;
     public static final int INTERNAL_COORD_WRITE_INTERVAL_TICKS = 5;
     public static final long INTERNAL_COORD_STALE_THRESHOLD_MS = 10_000L;
-    public static final int INTERNAL_SPECS_PER_CYCLE = 2;
+    // Removed: INTERNAL_SPECS_PER_CYCLE — replaced with specsPerFullBar()
+    //          method that derives from getMinOwnedSpecCost() (1.8.8).
     public static final int INTERNAL_TARGET_SHARKS = 10;
     public static final int INTERNAL_TARGET_KARAMBWANS = 9;
     public static final int INTERNAL_TARGET_SUPER_RESTORES = 2;
@@ -706,6 +762,12 @@ public class Corp implements TribotScript {
     private WorldTile lastCorePosition = null;
     private WorldTile lastCorpPosition = null;
     private long lastCoreDistanceCheck = 0;
+    // 1.8.8: throttle for the mid-fight reposition check. Without this the
+    // bot would re-issue a walk command every tick while Corp roams, which
+    // looks robotic and also breaks combat (every walk click cancels the
+    // current attack). 3 seconds matches how often Corp actually moves enough
+    // to matter.
+    private long lastRepositionCheck = 0;
     // Add this to your class variables
     private boolean startedFightingWithTeammates = false;
     private long fightStartTime = 0;
@@ -1800,6 +1862,17 @@ public class Corp implements TribotScript {
     private void handleWaitingForTeam() {
         Log.info("Waiting for team in lobby area...");
 
+        // 1.8.8: between-kills POH restoration check. Pre-1.8.8 the only
+        // callers of shouldStartRestorationCycle() were arrival handlers, so
+        // a bot that finished kill 1 with depleted spec would just go straight
+        // into kill 2 with 0%. Run it before ENTERING_COMBAT so a depleted
+        // bar can trigger a POH tele between kills.
+        if (shouldStartRestorationCycle()) {
+            Log.info("Spec depleted between kills - starting POH restoration cycle");
+            currentState = BotState.PREPARING_RESTORATION_CYCLE;
+            return;
+        }
+
         // Handle vengeance logic while waiting
         handleVengeanceLogic();
 
@@ -2149,6 +2222,34 @@ public class Corp implements TribotScript {
 
         handleProtectionPrayers();
 
+        // 1.8.8: mid-fight repositioning. handleCorpPositioning() was
+        // defined but never invoked, so the bot picked one starting tile
+        // and stayed there for the whole kill. When Corp roams (especially
+        // through a corner where the cave narrows), the player ends up
+        // INSIDE Corp's 5x5 hitbox and takes free stomp damage.
+        // Two checks: (a) emergency — we're already under Corp; immediate
+        // reposition. (b) periodic — we've drifted from any of the assigned
+        // cardinal positions; reposition on a 3s throttle.
+        Optional<Npc> repositionCorp = Query.npcs().nameEquals(CORPOREAL_BEAST).findFirst();
+        if (repositionCorp.isPresent()) {
+            Npc corp = repositionCorp.get();
+            WorldTile myPos = MyPlayer.getTile();
+            Area corpArea = corp.getArea();
+            if (myPos != null && corpArea != null && corpArea.contains(myPos)) {
+                Log.warn("Player on Corp's hitbox — emergency step away to avoid stomp damage");
+                if (moveToNearestCorpPosition(corp)) {
+                    lastRepositionCheck = System.currentTimeMillis();
+                    return; // skip rest of tick — we just clicked-to-walk
+                }
+            } else if (System.currentTimeMillis() - lastRepositionCheck > 3000) {
+                lastRepositionCheck = System.currentTimeMillis();
+                if (!isInGoodCorpPosition(corp)) {
+                    Log.info("Drifted from Corp position (Corp roamed) — repositioning");
+                    if (moveToNearestCorpPosition(corp)) return;
+                }
+            }
+        }
+
         // 1.8.7: detect a pre-activated spec that just fired in-line.
         // prepareSpecWeaponForCorp pre-activates spec before the bot
         // enters combat. The first attack consumes that spec, but it
@@ -2181,6 +2282,19 @@ public class Corp implements TribotScript {
 			return;
 		}
 
+		// 1.8.8: mid-fight POH restoration. If we're out of spec but the team
+		// hasn't hit its phase targets yet and Corp is still healthy enough
+		// to be worth dumping more stat-reducer specs into, break out of
+		// combat and run a POH cycle to refill. The natural termination is
+		// either teamPhaseNeeded()==0 (targets met, stay and melee) or Corp's
+		// HP dropping below corpMinHpForSpec (a teammate is killing it,
+		// switch to melee and help finish).
+		if (shouldStartRestorationCycle()) {
+			Log.info("Mid-fight spec dump: spec depleted with phase targets " +
+					"remaining and Corp HP above floor — POH restoration cycle");
+			currentState = BotState.PREPARING_RESTORATION_CYCLE;
+			return;
+		}
 
 		handleVengeanceLogic();
 
@@ -3527,32 +3641,38 @@ public class Corp implements TribotScript {
                 .map(Player::getTile)
                 .collect(Collectors.toList());
 
-        // Find position that's furthest from other players
+        // 1.8.8: score = separation-from-others MINUS distance-from-self.
+        // Pre-1.8.8 only considered separation, so when teammates weren't
+        // nearby (team still in lobby) every candidate tied at MAX_VALUE and
+        // the FIRST safe offset in CORP_POSITION_OFFSETS order won. With offset
+        // list [W, E, S, N], that biased toward East regardless of where the
+        // player actually was — picking East when approaching from the NW
+        // means the path-finder routes the player UNDER Corp. Weighting by
+        // self-distance picks the closest safe tile to the player, which is
+        // almost always the natural side to approach from.
         WorldTile bestPosition = null;
-        double maxMinDistance = 0;
+        double bestScore = -Double.MAX_VALUE;
 
         for (WorldTile position : dynamicPositions) {
-            // Calculate minimum distance to any other player
             double minDistanceToPlayer = allPlayerPositions.stream()
                     .mapToDouble(playerPos -> playerPos.distanceTo(position))
                     .min()
                     .orElse(Double.MAX_VALUE);
+            double selfDistance = myPos == null ? 0 : myPos.distanceTo(position);
+            // Cap separation so it can't run away with the score: beyond
+            // ~6 tiles, more separation doesn't actually help — we just want
+            // "not stacked on top of someone".
+            double separationScore = Math.min(minDistanceToPlayer, 6.0);
+            double score = separationScore - selfDistance;
 
-            // Prefer positions with maximum separation from others
-            if (minDistanceToPlayer > maxMinDistance) {
-                maxMinDistance = minDistanceToPlayer;
+            if (score > bestScore) {
+                bestScore = score;
                 bestPosition = position;
             }
         }
 
-        // If no position found with good separation, use closest available
         if (bestPosition == null) {
-            bestPosition = dynamicPositions.stream()
-                    .filter(pos -> allPlayerPositions.stream()
-                            .noneMatch(playerPos -> playerPos.distanceTo(pos) <= 1))
-                    .min((pos1, pos2) -> Double.compare(
-                            myPos.distanceTo(pos1), myPos.distanceTo(pos2)))
-                    .orElse(dynamicPositions.get(0)); // Fallback to first position
+            bestPosition = dynamicPositions.get(0); // safety net
         }
 
         return bestPosition;
@@ -5204,6 +5324,14 @@ public class Corp implements TribotScript {
             Log.info("Loot collected!");
         }
 
+        // 1.8.8: restoration tracking is PER-KILL. Each new Corp kill starts
+        // fresh — full POH cycle budget, zero specs counted, zero phase
+        // contribution attributed to this account. The pre-1.8.8 model was
+        // per-TRIP, which meant a single bank trip's restoration cycles got
+        // distributed across N kills; user wants every kill to be able to
+        // dump a full multi-cycle spec rotation.
+        resetRestorationTracking();
+
         // IMPORTANT: Try to keep at least one team member in the room to prevent Corp roaming
         // Check if other teammates are staying or if we should stay
         boolean shouldStayInRoom = shouldStayToPreventRoaming();
@@ -5603,8 +5731,29 @@ public class Corp implements TribotScript {
 
 		Optional<Npc> corpOpt = Query.npcs().nameEquals(CORPOREAL_BEAST).findFirst();
 		boolean corpPresent = corpOpt.isPresent();
-		boolean hasSpecEnergy = Combat.getSpecialAttackPercent() >= getMinSpecEnergy();
-		boolean cyclesRemaining = currentRestorationCycle < settings.totalRestorationCycles;
+		// 1.8.8: trigger on DEPLETED spec (not full spec — pre-1.8.8 had this
+		// inverted). Continue restoring as long as we still owe the team phase
+		// progress AND Corp is healthy enough to be worth spec'ing. The
+		// totalRestorationCycles count is a safety upper bound, not the real
+		// driver — the loop terminates naturally when:
+		//   (a) teamPhaseNeeded() returns 0 (phase targets met), OR
+		//   (b) Corp HP drops below corpMinHpForSpec (a teammate is killing
+		//       it; spec dumping is pointless past this point — go melee).
+		boolean specDepleted = Combat.getSpecialAttackPercent() < getMinSpecEnergy();
+		boolean phaseTargetsNotMet = teamPhaseNeeded() > 0;
+		// When Corp's health bar isn't visible, no one is attacking Corp yet,
+		// so it's at full HP — assume above floor. The visible-bar check
+		// inside isCorpHealthAboveSpecThreshold returns false in that case,
+		// which would wrongly block pre-engagement restoration.
+		boolean corpHealthAboveFloor;
+		if (!corpPresent) {
+			corpHealthAboveFloor = false;
+		} else {
+			Npc corp = corpOpt.get();
+			corpHealthAboveFloor = !corp.isHealthBarVisible()
+					|| isCorpHealthAboveSpecThreshold(corp);
+		}
+		boolean safetyCap = currentRestorationCycle < settings.totalRestorationCycles;
 		boolean hasHouseTabs = hasHouseTeleportTab();
 
 		if (!hasHouseTabs) {
@@ -5612,7 +5761,12 @@ public class Corp implements TribotScript {
 			return false;
 		}
 
-		return corpPresent && hasSpecEnergy && cyclesRemaining && !isInRestorationPhase;
+		return corpPresent
+				&& specDepleted
+				&& phaseTargetsNotMet
+				&& corpHealthAboveFloor
+				&& safetyCap
+				&& !isInRestorationPhase;
 	}
 
 	/**
@@ -6449,6 +6603,16 @@ public class Corp implements TribotScript {
         ownedSpecWeaponsCache = null;
     }
 
+    /** How many specs we can fire from a full bar with the cheapest owned
+     *  spec weapon. Used as a per-cycle safety bound on the spec loop —
+     *  the real terminator is the energy check, but a count cap prevents
+     *  infinite loops if specs silently fail. 1.8.8 replaces the hardcoded
+     *  INTERNAL_SPECS_PER_CYCLE (2) which over-capped Arclight (4/bar). */
+    private int specsPerFullBar() {
+        int cost = getMinOwnedSpecCost();
+        return cost > 0 ? Math.max(1, 100 / cost) : 2;
+    }
+
     /** Cheapest spec cost among owned weapons. Default 50% if nothing known. */
     private int getMinOwnedSpecCost() {
         int min = 100;
@@ -6621,7 +6785,7 @@ public class Corp implements TribotScript {
 	}
 
 	private void handleUsingInitialSpecs() {
-		Log.info("Using initial special attacks (" + currentSpecialAttacksUsed + "/" + INTERNAL_SPECS_PER_CYCLE + ")");
+		Log.info("Using initial special attacks (" + currentSpecialAttacksUsed + "/" + specsPerFullBar() + ")");
 
 		Optional<Npc> corpOpt = Query.npcs().nameEquals(CORPOREAL_BEAST).findFirst();
 		if (!corpOpt.isPresent()) {
@@ -6633,7 +6797,7 @@ public class Corp implements TribotScript {
 		Npc corp = corpOpt.get();
 
 		// Check if we're done with all specs
-		if (currentSpecialAttacksUsed >= INTERNAL_SPECS_PER_CYCLE ||
+		if (currentSpecialAttacksUsed >= specsPerFullBar() ||
 				Combat.getSpecialAttackPercent() < getMinSpecEnergy()) {
 
 			Log.info("Finished all special attacks - Energy remaining: " + Combat.getSpecialAttackPercent() + "%");
@@ -6690,7 +6854,7 @@ public class Corp implements TribotScript {
 			} else {
 				recordSpecUsed(chosenSpecWeapon);
 			}
-			Log.info("Used special attack " + currentSpecialAttacksUsed + "/" + INTERNAL_SPECS_PER_CYCLE +
+			Log.info("Used special attack " + currentSpecialAttacksUsed + "/" + specsPerFullBar() +
 					" - Current energy: " + Combat.getSpecialAttackPercent() + "%");
 		} else {
 			Log.warn("Failed to use special attack, continuing anyway");
@@ -7372,7 +7536,11 @@ public class Corp implements TribotScript {
         public String friendName = "TimeToAFK";
         public List<String> acceptableTeammates = new ArrayList<>(Arrays.asList(
                 "TimeToAFK", "RicoSuave32", "ahoyzfharem", "Nathan Lee", "In The Way"));
-        public int totalRestorationCycles = 3;
+        // 1.8.8: no longer the primary loop driver — it's now a safety upper
+        // bound. The real termination is phase targets met OR Corp HP <
+        // corpMinHpForSpec. Bumped 3 → 10 so it never triggers in practice;
+        // 10 cycles per kill is well above the realistic ceiling.
+        public int totalRestorationCycles = 10;
         public int specialAttacksPerCycle = 2;
 
         // Combat
@@ -7394,11 +7562,13 @@ public class Corp implements TribotScript {
 
         // Spec
         public int minSpecEnergy = 50;
-        // Lowered from 1200 (1.8.7): the gate is now actually enforced
-        // (1.7.3 fix), and a 1200 floor blocks Phase 2/3 specs on a team
-        // that drops Corp fast. 600 keeps the "don't spec a near-dead Corp"
-        // intent while letting team rotations actually finish.
-        public int corpMinHpForSpec = 600;
+        // 1.8.8: this is the restoration-loop termination floor, not a per-spec
+        // cooldown. Corp's stat reductions persist for the whole kill but its
+        // HP regens, so the right time to stop dumping defense/attack-reducer
+        // specs and join melee is when Corp's HP has already dropped (a real
+        // teammate is actively damaging it). 1700 means "Corp lost ~15% HP →
+        // stop spec dumping, start meleeing."
+        public int corpMinHpForSpec = 1700;
 
         // Dark core strategy (Phase G).
         // false = modern attack-and-step (Elder maul / DWH burst, kill core mid-air).
