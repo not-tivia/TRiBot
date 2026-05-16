@@ -9384,6 +9384,7 @@ public class Corp implements TribotScript {
         mySnapshot.bgsDamageDealt = 0;
         mySnapshot.claimedCorpOffset = null;  // release positional claim for next kill
         committedSpecPhase = 0; // 1.9.37: clear per-kill ratchet
+        maxRealCountThisKill = 0; // 1.9.38: clear per-kill realCount ratchet
     }
 
     // ========== SESSION-END SIGNALING (1.7.1) ==========
@@ -9781,6 +9782,15 @@ public class Corp implements TribotScript {
      *  coordinatorOnKillEnded(). */
     private int committedSpecPhase = 0;
 
+    /** 1.9.38: per-kill ratchet on the real-teammate count. Once we've
+     *  seen N real teammates nearby this kill, we keep treating "team
+     *  output" as if N were still present, even if the SDK loses sight
+     *  of them later. Without this ratchet a teammate stepping behind
+     *  Corp regresses the multiplier 2x → 1x, doubling the effective
+     *  spec target for the rest of the kill (10 Arclight → 20). Reset
+     *  in coordinatorOnKillEnded(). */
+    private int maxRealCountThisKill = 0;
+
     private int teamPhaseNeeded() {
         // Base aggregate: coordinator if enabled, otherwise just our own snapshot.
         TeamAggregate agg;
@@ -9794,9 +9804,12 @@ public class Corp implements TribotScript {
         // Real-teammate multiplier: assume each visible human partner contributes
         // roughly the same per-kill output as the bot. Approximation, but fixes
         // the "1 bot + 1 human stays on Phase 1 forever" trap.
+        // 1.9.38: ratchet on max realCount seen this kill (see field comment).
         int realCount = countRealTeammatesNearby();
-        if (realCount > 0) {
-            int multiplier = 1 + realCount;
+        if (realCount > maxRealCountThisKill) maxRealCountThisKill = realCount;
+        int effectiveRealCount = maxRealCountThisKill;
+        if (effectiveRealCount > 0) {
+            int multiplier = 1 + effectiveRealCount;
             agg.phase1Specs *= multiplier;
             agg.phase2Specs *= multiplier;
             agg.phase3BgsDamage *= multiplier;
