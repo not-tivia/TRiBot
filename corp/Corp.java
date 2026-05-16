@@ -1334,6 +1334,9 @@ public class Corp implements TribotScript {
     // unpredictable final state. Use this timestamp to skip activation if
     // we clicked recently — trust the prior click instead.
     private long lastSpecActivateAt = 0;
+    // 1.9.40: friend-house typing debounce — wall-clock guard against double-typing.
+    private long lastFriendHouseTypeAt = 0;
+    private static final long FRIEND_HOUSE_TYPE_DEBOUNCE_MS = 12000;
     private static final long SPEC_ACTIVATE_DEBOUNCE_MS = 1200;
 
     // 1.9.2: tracks the spec-energy value at the most recent pre-activation.
@@ -4461,6 +4464,37 @@ public class Corp implements TribotScript {
         WorldTile myPos = MyPlayer.getTile();
         Optional<Npc> corpOpt = Query.npcs().nameEquals(CORPOREAL_BEAST).findFirst();
         WorldTile corpCenter = corpOpt.isPresent() ? corpOpt.get().getArea().getCenter() : null;
+        Area corpArea = corpOpt.isPresent() ? corpOpt.get().getArea() : null;
+
+        // 1.9.40: HARD pre-filter — reject candidates whose direct line
+        // from the player's current tile crosses Corp's hitbox. User
+        // reported "we literally ran through the entire corps hitbox to
+        // find a place to attack from" — the prior same-side +5 bonus
+        // could be outweighed by separation/self-distance, so the
+        // assignment still picked a far-side tile and the walker routed
+        // through Corp's tiles, taking stomp damage. Fall back to the
+        // unfiltered list only if NO candidate is reachable without
+        // crossing — in that case the caller's waypoint detour does its
+        // best, but at this 1v1 + 1bot mode there's almost always at
+        // least one cardinal that doesn't require crossing.
+        List<WorldTile> reachable = dynamicPositions;
+        if (myPos != null && corpArea != null) {
+            List<WorldTile> filtered = dynamicPositions.stream()
+                    .filter(p -> !lineCrossesCorp(myPos, p, corpArea))
+                    .collect(Collectors.toList());
+            if (!filtered.isEmpty()) {
+                reachable = filtered;
+                if (filtered.size() != dynamicPositions.size()) {
+                    Log.info("Filtered Corp positions: "
+                            + filtered.size() + "/" + dynamicPositions.size()
+                            + " reachable without crossing Corp's hitbox");
+                }
+            } else {
+                Log.warn("ALL " + dynamicPositions.size()
+                        + " candidate positions require crossing Corp's "
+                        + "hitbox — falling back to detour walk");
+            }
+        }
 
         List<WorldTile> allPlayerPositions = Query.players()
                 .stream()
@@ -4479,7 +4513,7 @@ public class Corp implements TribotScript {
         WorldTile bestPosition = null;
         double bestScore = -Double.MAX_VALUE;
 
-        for (WorldTile position : dynamicPositions) {
+        for (WorldTile position : reachable) {
             double minDistanceToPlayer = allPlayerPositions.stream()
                     .mapToDouble(playerPos -> playerPos.distanceTo(position))
                     .min()
@@ -4518,10 +4552,13 @@ public class Corp implements TribotScript {
         }
 
         if (bestPosition == null) {
-            bestPosition = dynamicPositions.get(0); // safety net
+            bestPosition = reachable.get(0); // safety net, prefer pre-filtered list
         }
         Log.info("Picked Corp position " + bestPosition + " (score=" + bestScore
-                + ") from " + dynamicPositions.size() + " candidates");
+                + ") from " + reachable.size() + " candidates"
+                + (reachable.size() != dynamicPositions.size()
+                        ? " (filtered from " + dynamicPositions.size() + ")"
+                        : ""));
         return bestPosition;
     }
 
@@ -8798,11 +8835,25 @@ public class Corp implements TribotScript {
 		}
 		Log.info("Verified friend-house input widget present, typing now");
 
+		// 1.9.40: state-based typing debounce — independent of widget
+		// content detection. Pre-1.9.40 (and 1.9.39's widget-text check)
+		// the bot could still double-type if readFriendHouseInputText()
+		// returned empty because the SDK didn't expose the input widget
+		// the way we expected. Track the wall-clock time of the last
+		// type and refuse to type again within FRIEND_HOUSE_TYPE_DEBOUNCE_MS.
+		long nowMs = System.currentTimeMillis();
+		if (nowMs - lastFriendHouseTypeAt < FRIEND_HOUSE_TYPE_DEBOUNCE_MS) {
+			Log.info("Friend-house typed " + (nowMs - lastFriendHouseTypeAt)
+					+ "ms ago — not typing again, waiting for resolve");
+			return Waiting.waitUntil(8000, () -> isInFriendHouse());
+		}
+
 		try {
 			// 1.9.7 / 1.9.11: pre-typing settle delay so the input field
 			// is focused before we start typing.
 			Waiting.waitNormal(550, 150);
 			Keyboard.typeString(hostName);
+			lastFriendHouseTypeAt = System.currentTimeMillis(); // 1.9.40
 			Waiting.waitNormal(900, 200);
 
 			// 1.9.21: re-verify input field still exists before pressing
