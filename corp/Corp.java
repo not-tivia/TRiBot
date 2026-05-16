@@ -21,25 +21,28 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
- *   1.9.21 (2026-05-16) - CRITICAL: hard gate against typing into public
- *                         chat. Production log showed the bot typing
- *                         "TimeToAFK" into PUBLIC CHAT after a state
- *                         transition closed the friend-house dialog
- *                         mid-sequence. Chatbox.isOpen() returns true for
- *                         any chat window (incl. public chat input), so
- *                         the previous gate didn't catch it. Now:
- *                           (1) Before typing: require widget [162, 44]
- *                               (the friend-house name-input field,
- *                               Chatbox.MES_TEXT2 per user) to be present.
- *                               If not, abort — return false, don't type.
- *                           (2) Between typing and pressing Enter:
- *                               re-verify [162, 44] still exists. If the
- *                               dialog closed between the two, refuse to
- *                               press Enter — buffered text would dump
- *                               into public chat.
- *                         This is a major detection-vector fix; never
- *                         type unless we can prove the right dialog is
- *                         open.
+ *   1.9.21 (2026-05-16) - CRITICAL safety fix + walk-around-Corp fix.
+ *                         (a) Hard gate against typing into public chat.
+ *                             Production log showed the bot typing
+ *                             "TimeToAFK" into PUBLIC CHAT after a state
+ *                             transition closed the friend-house dialog
+ *                             mid-sequence. Chatbox.isOpen() returns
+ *                             true for any chat window incl. public chat
+ *                             input, so the old gate didn't catch it.
+ *                             Now we require widget [162, 44] (the
+ *                             friend-house input field) BEFORE typing
+ *                             AND re-verify it BETWEEN typing and Enter.
+ *                             If either check fails, abort without typing.
+ *                         (b) Multi-step walk when straight line from
+ *                             player to chosen Corp position crosses
+ *                             Corp's hitbox. lineCrossesCorp samples
+ *                             points along the line; if any falls in
+ *                             corpArea, walk first to a waypoint on the
+ *                             player's side (5 tiles out from Corp
+ *                             center along the dominant approach axis),
+ *                             THEN to the target. Pre-1.9.21 RuneScape's
+ *                             A*/L-shape pathing took the bot straight
+ *                             under Corp and we took stomp damage.
  *   1.9.20 (2026-05-16) - Two fixes:
  *                         (a) Friend-widget shortcut now targets the exact
  *                             path [162, 39, 0] (first child of [162, 39]
@@ -5500,6 +5503,24 @@ public class Corp implements TribotScript {
 		WorldTile bestPosition = assignUniqueCorpPosition(safePositions);
 
 		if (bestPosition != null) {
+			// 1.9.21: multi-step walk if the straight line from player to
+			// bestPosition would cross Corp's hitbox. Pre-1.9.21 we
+			// LocalWalking-walked directly to the target — RuneScape's
+			// L-shape pathing then routed through Corp's tile and the
+			// bot took stomp damage. Now we route via a waypoint on the
+			// player's side of Corp first.
+			WorldTile myPos = MyPlayer.getTile();
+			Area corpArea = corp.getArea();
+			if (myPos != null && lineCrossesCorp(myPos, bestPosition, corpArea)) {
+				WorldTile waypoint = pickWaypointAroundCorp(myPos, bestPosition, corp);
+				if (waypoint != null) {
+					Log.info("Path to " + bestPosition + " crosses Corp — "
+							+ "walking via waypoint " + waypoint + " first");
+					LocalWalking.walkTo(waypoint);
+					Waiting.waitUntil(4000, () ->
+							MyPlayer.getTile().distanceTo(waypoint) <= 2);
+				}
+			}
 			if (LocalWalking.walkTo(bestPosition)) {
 				Log.info("Moving to safe Corp position: " + bestPosition);
 				return Waiting.waitUntil(5000, () ->
@@ -5507,6 +5528,52 @@ public class Corp implements TribotScript {
 			}
 		}
 		return false;
+	}
+
+	/** 1.9.21: would a straight-line walk from `from` to `to` pass through
+	 *  the corpArea? Samples points along the line and checks each against
+	 *  corpArea.contains(). This is a conservative check — RuneScape's
+	 *  actual A* pathfinder may route around, but we want to FORCE the
+	 *  bot to never cross Corp regardless of A*'s choices. */
+	private boolean lineCrossesCorp(WorldTile from, WorldTile to, Area corpArea) {
+		if (corpArea == null) return false;
+		int dx = to.getX() - from.getX();
+		int dy = to.getY() - from.getY();
+		int steps = Math.max(Math.abs(dx), Math.abs(dy));
+		if (steps == 0) return false;
+		for (int i = 1; i < steps; i++) {
+			int x = from.getX() + dx * i / steps;
+			int y = from.getY() + dy * i / steps;
+			WorldTile inter = new WorldTile(x, y, from.getPlane());
+			if (corpArea.contains(inter)) return true;
+		}
+		return false;
+	}
+
+	/** 1.9.21: pick a waypoint that's on the PLAYER'S side of Corp, far
+	 *  enough out of Corp's hitbox to break the line-crosses-corp
+	 *  problem. Returns null if no usable waypoint found; caller falls
+	 *  through to direct walk. */
+	private WorldTile pickWaypointAroundCorp(WorldTile myPos, WorldTile target, Npc corp) {
+		if (myPos == null || corp == null) return null;
+		Area corpArea = corp.getArea();
+		WorldTile corpCenter = corpArea.getCenter();
+		int dx = myPos.getX() - corpCenter.getX();
+		int dy = myPos.getY() - corpCenter.getY();
+		// Move 5 tiles from Corp center along player's dominant approach axis.
+		WorldTile waypoint;
+		if (Math.abs(dx) >= Math.abs(dy)) {
+			int sign = dx >= 0 ? 1 : -1;
+			waypoint = new WorldTile(corpCenter.getX() + sign * 5,
+					myPos.getY(), corpCenter.getPlane());
+		} else {
+			int sign = dy >= 0 ? 1 : -1;
+			waypoint = new WorldTile(myPos.getX(),
+					corpCenter.getY() + sign * 5, corpCenter.getPlane());
+		}
+		// Don't pick waypoint inside Corp's hitbox.
+		if (corpArea.contains(waypoint)) return null;
+		return waypoint;
 	}
 
     /** Defender tier priority — highest tier first. The iteration picks the
