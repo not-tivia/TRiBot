@@ -21,6 +21,27 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.16 (2026-05-16) - Two flow fixes after the 1.9.15 test:
+ *                         (a) Prep now runs IN PARALLEL with the walk to
+ *                             the boss room. Pre-1.9.16 handleEnteringCombat
+ *                             ran all prep (pot drink, slot eat, equip,
+ *                             pre-activate spec, veng cast) FIRST, then
+ *                             called moveToCorpBossRoom. User saw 11s of
+ *                             prep in the lobby before any walking
+ *                             started. OSRS walks are server-side — once
+ *                             we click the passage, the player keeps
+ *                             moving while we open inventory and click
+ *                             items. Now: kick off the walk first
+ *                             (fire-and-forget), then run prep clicks
+ *                             concurrently, finally wait for arrival.
+ *                         (b) Friend-widget shortcut now requires an
+ *                             action, not just text containing the host
+ *                             name. Pre-1.9.16 the filter matched the
+ *                             static text-label widget which has no
+ *                             actions; widget.click() on it fell through
+ *                             to a "click ground" and the bot walked
+ *                             off into the distance instead of teleing
+ *                             to the friend's house.
  *   1.9.15 (2026-05-16) - Flow restructuring after the user pointed out
  *                         several order-of-operations issues:
  *                         (a) Ferox banking now uses GlobalWalking.walkToBank
@@ -2347,29 +2368,33 @@ public class Corp implements TribotScript {
     private void handleEnteringCombat() {
         Log.info("Entering combat...");
 
-        // 1.9.15: prep WHILE we're walking, not after. Activate quick prayer
-        // and pre-activate the spec button as we cross the passage — both
-        // are instant clicks that don't delay the walk. Pre-1.9.15 we did
-        // all this in handleWaitingForTeam (lobby) or after Corp was visible
-        // (in-room), wasting time in both cases. Veng cast is also moved
-        // here so it lands right before combat instead of getting wasted
-        // in the lobby.
+        // 1.9.16: kick off the walk FIRST, then do prep DURING the walk.
+        // OSRS walks are server-side: once we've issued the click on the
+        // passage, the player keeps walking even while we open inventory
+        // and click items. Pre-1.9.16 the order was prayer→pot→eat→equip
+        // →spec→veng (all blocking ~11s), THEN moveToCorpBossRoom — so
+        // none of the prep overlapped with the walk. User saw the bot
+        // stand in the lobby for 11s doing prep, then walk to Corp.
+        if (!isInCorpBossRoom()) {
+            Log.info("Kicking off walk to boss room (prep runs concurrently)");
+            moveToCorpBossRoom(); // fire-and-forget; we don't block on arrival
+        }
+
+        // Now run the prep clicks. The walking server keeps the player
+        // moving across the passage while these run.
         if (!Prayer.isQuickPrayerEnabled()) {
             Log.info("Activating quick prayer (entering combat)");
             Prayer.enableQuickPrayer();
         }
         prepareSpecWeaponInLobby();
-        // Cast vengeance while walking — heal will be active right when we
-        // start taking hits. (handleVengeanceLogic gates on settings.useVengeance
+        // Veng cast lands right as we arrive at Corp — heal active when
+        // first hit lands. (handleVengeanceLogic gates on useVengeance
         // and rune availability internally.)
         handleVengeanceLogic();
 
-        // Make sure we're in boss room
+        // Now wait for arrival before engaging.
         if (!isInCorpBossRoom()) {
-            Log.info("Moving from lobby to boss room");
-            if (moveToCorpBossRoom()) {
-                Waiting.waitUntil(5000, () -> isInCorpBossRoom());
-            }
+            Waiting.waitUntil(8000, () -> isInCorpBossRoom());
             return;
         }
 
@@ -8047,11 +8072,18 @@ public class Corp implements TribotScript {
 		}
 		Log.info("Clicked 'Friend's house', waiting for dialog...");
 
-		// Wait for the typing dialog to actually appear before we type.
+		// 1.9.16: wait for the typing dialog AND a render settle delay.
+		// Chatbox.isOpen() can return true the same tick the dialog opens
+		// but the child widgets (incl. the friend shortcut) take 1-2 more
+		// ticks to populate their bounding rectangles. Pre-1.9.16 we
+		// queried widgets immediately after isOpen, hit a still-empty
+		// widget tree, fell through to a stale widget reference, and
+		// widget.click() ended up clicking a far-away ground tile.
 		if (!Waiting.waitUntil(5000, () -> Chatbox.isOpen())) {
 			Log.warn("Friend's-house dialog did not open within 5s");
 			return false;
 		}
+		Waiting.waitNormal(700, 200);
 		return handleFriendNameDialog();
 	}
 
@@ -8062,12 +8094,14 @@ public class Corp implements TribotScript {
 		String hostName = getEffectiveFriendName();
 		Log.info("Dialog appeared for host=" + hostName + ", checking widget shortcut first...");
 
-		// 1.9.15: search root 162 (chatbox) for ANY widget whose text
-		// contains the host name (typically displayed as "Last name:
-		// TimeToAFK" after the first visit). Pre-1.9.15 used hardcoded
-		// path [162, 39, 0] which is brittle — same fragility we hit
-		// with the Vengeance widget at [218, 142]. Path-agnostic match
-		// works regardless of where the game places the shortcut widget.
+		// 1.9.15 / 1.9.16: search root 162 (chatbox) for an INTERACTIVE
+		// widget whose text contains the host name. Pre-1.9.16 we just
+		// matched text containing "timetoafk" — but that also matches the
+		// static text-label widget which is NOT clickable. Clicking a
+		// non-interactive widget falls through to a "click ground" which
+		// makes the bot walk off into the distance. Now we require at
+		// least one action OR an explicit visible/clickable state, so
+		// the label widget gets filtered out.
 		final String hostLower = hostName == null ? "" : hostName.toLowerCase();
 		Optional<Widget> friendWidgetOpt = Query.widgets()
 				.inRoots(162)
@@ -8075,6 +8109,24 @@ public class Corp implements TribotScript {
 					String raw = w.getText().orElse("");
 					String clean = raw.replaceAll("<[^>]*>", "").toLowerCase();
 					return clean.contains(hostLower);
+				})
+				.filter(w -> {
+					// 1.9.16: require an action AND the widget to be
+					// actively rendered. Pre-1.9.16 text-only label widgets
+					// matched the text filter but had no actions (or zero-
+					// sized bounds), and widget.click() fell through to a
+					// ground click — bot walked off into the distance
+					// instead of teleing.
+					try {
+						if (w.getActions() == null || w.getActions().isEmpty()) return false;
+					} catch (Throwable ignored) {
+						return false;
+					}
+					try {
+						return w.isBeingDrawn() && !w.isHidden();
+					} catch (Throwable ignored) {
+						return false;
+					}
 				})
 				.findFirst();
 
