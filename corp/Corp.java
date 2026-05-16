@@ -21,6 +21,36 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.0 (2026-05-16) - Three fixes from a 1.8.9 production log:
+ *                        (a) Multi-spec per bar. The in-line spec detector
+ *                            unconditionally queued switch-back-to-main after
+ *                            the first spec. With Elder maul (50%) and 50%
+ *                            energy left in the bar, the bot should fire a
+ *                            second spec before switching off — but it
+ *                            didn't, so 1.8.8's mid-fight restoration trigger
+ *                            never saw a depleted bar. Now after each in-line
+ *                            spec fire we check canFireAnotherSpecOnThisBar()
+ *                            (energy >= cost AND phase targets not met AND
+ *                            Corp HP above floor) and re-activate spec
+ *                            instead of switching back. Switch-back only
+ *                            fires when the bar can't support another spec.
+ *                        (b) Lobby pre-spec. handleWaitingForTeam now calls
+ *                            prepareSpecWeaponInLobby() before transitioning
+ *                            to ENTERING_COMBAT, so the bot drinks super
+ *                            combat, eats karambwan for slot, equips spec
+ *                            weapon, and pre-activates spec WHILE STILL IN
+ *                            THE LOBBY. Pre-1.9.0 the entire prep sequence
+ *                            ran under Corp's nose — ~10 seconds of stomp
+ *                            damage absorbed while drinking/equipping. The
+ *                            in-room prepareSpecWeaponForCorp becomes
+ *                            idempotent: already-prepped → no-op.
+ *                        (c) Skip prep when HP critical. prepareSpecWeaponForCorp
+ *                            now bails to emergencyComboEat if HP <=
+ *                            INTERNAL_COMBO_EAT_HP (50). Drinking a potion
+ *                            at 50 HP under sustained Corp damage was getting
+ *                            the bot killed; it's better to start combat
+ *                            un-prepped and let shouldUseSpecialAttack pick
+ *                            up the spec later once HP recovers.
  *   1.8.9 (2026-05-16) - Survival fixes after a death log: bot was firing
  *                        pre-activated spec and swapping weapons at single-
  *                        digit HP instead of eating.
@@ -1897,6 +1927,16 @@ public class Corp implements TribotScript {
         // Handle vengeance logic while waiting
         handleVengeanceLogic();
 
+        // 1.9.0: pre-spec in the lobby BEFORE walking through the passage.
+        // The pre-1.9.0 flow ran the entire prep (drink super combat, eat
+        // karambwan slot, equip spec weapon, pre-activate spec) AFTER
+        // arriving at Corp's tile — ~10 seconds standing under Corp taking
+        // damage. The passage is safe ground; do all that work here so the
+        // first hit on Corp is already a spec. prepareSpecWeaponInLobby
+        // skips the Corp-visible / Corp-alive gates that prepareSpecWeaponForCorp
+        // requires.
+        prepareSpecWeaponInLobby();
+
         // Check if acceptable teammates are in the boss room
         if (hasAcceptableTeammatesInBossRoom()) {
             Log.info("Acceptable teammates detected in boss room, joining them");
@@ -2295,22 +2335,34 @@ public class Corp implements TribotScript {
             }
         }
 
-        // 1.8.7: detect a pre-activated spec that just fired in-line.
-        // prepareSpecWeaponForCorp pre-activates spec before the bot
-        // enters combat. The first attack consumes that spec, but it
-        // happens outside the USING_SPECIAL_ATTACK state so the normal
-        // switch-back path never runs. Notice the energy drop + spec
-        // button now off + we have the spec weapon equipped → queue
-        // the switch-back so we don't stay on the spec weapon all kill.
+        // 1.8.7 / 1.9.0: detect a pre-activated spec that just fired in-line.
+        // prepareSpecWeaponForCorp pre-activates spec; the first attack
+        // consumes it outside USING_SPECIAL_ATTACK so the normal switch-back
+        // path never runs.
+        // 1.9.0: BEFORE switching back to main weapon, check if we can fire
+        // another spec on the SAME bar — with Elder maul (50%) that's still
+        // 1 more spec, with Arclight (25%) that's 3 more. Pre-1.9.0 the bot
+        // queued switch-back after every single spec, so it only ever fired
+        // one spec per restoration cycle even when phase targets weren't met.
         if (specWeaponReadyForUse
                 && !Combat.isSpecialAttackEnabled()
                 && isSpecWeaponEquipped()
                 && Combat.getSpecialAttackPercent() < 100) {
-            Log.info("Pre-activated spec fired in-line — queueing switch back to main");
+            Log.info("Pre-activated spec fired in-line");
             // Record the spec we used so the team-phase aggregator advances.
             if (chosenSpecWeapon != null) recordSpecUsed(chosenSpecWeapon);
             specWeaponReadyForUse = false;
-            queueSpecWeaponSwitchBack();
+
+            if (canFireAnotherSpecOnThisBar()) {
+                Log.info("Energy + phase targets allow another spec — re-activating spec for next hit");
+                if (Combat.activateSpecialAttack()) {
+                    specWeaponReadyForUse = true;
+                    Log.info("Re-activated special attack: next hit will spec again");
+                }
+            } else {
+                Log.info("Spec bar exhausted (or phase targets met / Corp HP below floor) — switching back to main");
+                queueSpecWeaponSwitchBack();
+            }
         }
 
         // 🔥 PRE-ACTIVATE SPECIAL ATTACK IF CONDITIONS MET
@@ -6025,6 +6077,53 @@ public class Corp implements TribotScript {
     }
 
     // ========== UPDATED PREPARE SPEC WEAPON METHOD ==========
+	/** 1.9.0: lobby-side prep. Same idea as prepareSpecWeaponForCorp but
+	 *  without the Corp-visible / Corp-alive checks (we're outside the boss
+	 *  room and Corp isn't loaded yet). Idempotent — if we're already prepped
+	 *  (spec weapon equipped + spec pre-activated), it no-ops. */
+	private void prepareSpecWeaponInLobby() {
+		if (chosenSpecWeapon == null) {
+			detectAndSetSpecWeapon();
+		}
+		if (chosenSpecWeapon == null) return; // nothing to prep with
+
+		// Already prepped? Spec weapon equipped + spec button active → no work.
+		if (isSpecWeaponEquipped() && Combat.isSpecialAttackEnabled()) {
+			specWeaponReadyForUse = true;
+			return;
+		}
+
+		// Energy gate: don't waste prep on a near-empty bar.
+		if (Combat.getSpecialAttackPercent() < getMinSpecEnergy()) return;
+
+		// Make inventory space if needed (without potion drink — we're not
+		// taking damage out here so it's safe to use the slow path).
+		if (Inventory.isFull() && !isStatsBoosted()) {
+			Log.info("Lobby prep: stats not boosted - drinking super combat");
+			if (drinkSuperCombat()) {
+				Waiting.waitUntil(2000, this::isStatsBoosted);
+			}
+		}
+		if (Inventory.isFull()) {
+			Log.info("Lobby prep: eating karambwan for inventory space");
+			eatKarambwan();
+		}
+
+		if (!isSpecWeaponEquipped()) {
+			Log.info("Lobby prep: equipping spec weapon " + chosenSpecWeapon);
+			if (!equipSpecWeapon()) {
+				Log.warn("Lobby prep: failed to equip spec weapon - will retry in-room");
+				return;
+			}
+		}
+
+		specWeaponReadyForUse = true;
+		if (!Combat.isSpecialAttackEnabled()) {
+			Log.info("Lobby prep: PRE-ACTIVATING special attack — first Corp hit will spec");
+			Combat.activateSpecialAttack();
+		}
+	}
+
 	private void prepareSpecWeaponForCorp(Npc corp) {
 		if (chosenSpecWeapon == null) {
 			detectAndSetSpecWeapon();
@@ -6033,6 +6132,21 @@ public class Corp implements TribotScript {
 		Log.info("prepareSpecWeaponForCorp called - Corp alive: " + isCorpAlive(corp) +
 				", Spec energy: " + Combat.getSpecialAttackPercent() +
 				", Chosen spec weapon: " + chosenSpecWeapon);
+
+		// 1.9.0: skip prep entirely if HP is already low. Drinking a super
+		// combat potion is a 1-2 tick animation lock and the karambwan
+		// slot-eat that follows is another tick. With Corp swinging, that's
+		// up to 60 HP of damage absorbed during prep. If we're below the
+		// combo-eat threshold (50), prep is suicidal — eat instead and let
+		// combat start un-prepped. We'll still spec via shouldUseSpecialAttack
+		// once HP is back above the threshold.
+		int currentHp = MyPlayer.getCurrentHealth();
+		if (currentHp <= INTERNAL_COMBO_EAT_HP) {
+			Log.warn("HP " + currentHp + " <= " + INTERNAL_COMBO_EAT_HP +
+					" — skipping spec prep, combo-eating instead");
+			emergencyComboEat();
+			return;
+		}
 
 		if (isCorpAlive(corp) && Combat.getSpecialAttackPercent() >= getMinSpecEnergy()) {
 
@@ -6647,6 +6761,22 @@ public class Corp implements TribotScript {
      *  after every bank trip and on script start. */
     private void invalidateOwnedSpecWeaponsCache() {
         ownedSpecWeaponsCache = null;
+    }
+
+    /** 1.9.0: true when we have enough energy + phase headroom for another
+     *  spec on the current bar. Used by the in-line spec detector to decide
+     *  whether to re-activate spec or switch back to main weapon. Mirrors
+     *  the conditions in shouldStartRestorationCycle minus the spec-depleted
+     *  gate — we're asking "can we keep going" not "should we restore". */
+    private boolean canFireAnotherSpecOnThisBar() {
+        if (Combat.getSpecialAttackPercent() < getMinSpecEnergy()) return false;
+        if (teamPhaseNeeded() == 0) return false;
+        Optional<Npc> corpOpt = Query.npcs().nameEquals(CORPOREAL_BEAST).findFirst();
+        if (!corpOpt.isPresent()) return false;
+        Npc corp = corpOpt.get();
+        // If health bar isn't visible (just engaged, not yet hit), assume full
+        // HP — same logic as the restoration gate.
+        return !corp.isHealthBarVisible() || isCorpHealthAboveSpecThreshold(corp);
     }
 
     /** How many specs we can fire from a full bar with the cheapest owned
