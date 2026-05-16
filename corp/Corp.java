@@ -41,8 +41,8 @@ import java.util.stream.Collectors;
  *                             player's side (5 tiles out from Corp
  *                             center along the dominant approach axis),
  *                             THEN to the target. Pre-1.9.21 RuneScape's
- *                             A*/L-shape pathing took the bot straight
- *                             under Corp and we took stomp damage.
+ *                             A-star / L-shape pathing took the bot
+ *                             straight under Corp and we took stomp damage.
  *   1.9.20 (2026-05-16) - Two fixes:
  *                         (a) Friend-widget shortcut now targets the exact
  *                             path [162, 39, 0] (first child of [162, 39]
