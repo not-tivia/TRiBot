@@ -21,6 +21,29 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.20 (2026-05-16) - Two fixes:
+ *                         (a) Friend-widget shortcut now targets the exact
+ *                             path [162, 39, 0] (first child of [162, 39]
+ *                             where the host name text lives — empty
+ *                             parent matched but clicking it ground-clicked).
+ *                             Filter requires path length 3 AND
+ *                             path[1]==39 AND path[2]==0.
+ *                         (b) Corp position picker: "same-side" bonus
+ *                             (+5) for tiles on the player's side of
+ *                             Corp's center. Pre-1.9.20 the picker only
+ *                             optimized self-distance, which could pick
+ *                             a tile that's close in Euclidean terms but
+ *                             on the OPPOSITE side of Corp — walker then
+ *                             routes through Corp's hitbox. Same-side
+ *                             bonus pulls the chosen tile toward the
+ *                             approach side. Caveat: if all safe tiles
+ *                             ARE on the far side, the walker can still
+ *                             cross Corp; would need a multi-step walk
+ *                             to fully fix.
+ *   1.9.19 (2026-05-16) - Earlier widget targeting attempt at [162, 39]
+ *                         (parent box). Diagnostic logging showed parent
+ *                         text was empty; superseded by 1.9.20 which
+ *                         targets the [..., 0] child instead.
  *   1.9.18 (2026-05-16) - Fix vengeance trigger logic. 1.9.17 made
  *                         handleReadyForFirstCast a no-op and relied on
  *                         ACTIVE_CASTING (which fires after damage taken).
@@ -4233,23 +4256,23 @@ public class Corp implements TribotScript {
     // Add better position assignment logic
     private WorldTile assignUniqueCorpPosition(List<WorldTile> dynamicPositions) {
         WorldTile myPos = MyPlayer.getTile();
+        Optional<Npc> corpOpt = Query.npcs().nameEquals(CORPOREAL_BEAST).findFirst();
+        WorldTile corpCenter = corpOpt.isPresent() ? corpOpt.get().getArea().getCenter() : null;
 
-        // Get all player positions (including non-teammates to avoid all stacking)
         List<WorldTile> allPlayerPositions = Query.players()
                 .stream()
                 .filter(player -> !player.getName().equals(MyPlayer.getUsername()))
                 .map(Player::getTile)
                 .collect(Collectors.toList());
 
-        // 1.8.8: score = separation-from-others MINUS distance-from-self.
-        // Pre-1.8.8 only considered separation, so when teammates weren't
-        // nearby (team still in lobby) every candidate tied at MAX_VALUE and
-        // the FIRST safe offset in CORP_POSITION_OFFSETS order won. With offset
-        // list [W, E, S, N], that biased toward East regardless of where the
-        // player actually was — picking East when approaching from the NW
-        // means the path-finder routes the player UNDER Corp. Weighting by
-        // self-distance picks the closest safe tile to the player, which is
-        // almost always the natural side to approach from.
+        // 1.8.8 / 1.9.20: score factors —
+        //   + separation from other players (capped at 6)
+        //   - distance from self (prefer closer)
+        //   + bonus when position is on SAME SIDE of Corp as the player
+        //     (we don't have to cross Corp's hitbox to get there)
+        // Pre-1.9.20 the self-distance alone could pick a tile that was
+        // technically close in Euclidean terms but on the opposite side
+        // of Corp — the walker then routed through Corp's hitbox.
         WorldTile bestPosition = null;
         double bestScore = -Double.MAX_VALUE;
 
@@ -4259,11 +4282,31 @@ public class Corp implements TribotScript {
                     .min()
                     .orElse(Double.MAX_VALUE);
             double selfDistance = myPos == null ? 0 : myPos.distanceTo(position);
-            // Cap separation so it can't run away with the score: beyond
-            // ~6 tiles, more separation doesn't actually help — we just want
-            // "not stacked on top of someone".
             double separationScore = Math.min(minDistanceToPlayer, 6.0);
-            double score = separationScore - selfDistance;
+
+            // Same-side bonus: if player and target are both on the SAME
+            // side of Corp's center on the dominant axis, no need to
+            // cross. Add +5 to the score (large enough to outweigh small
+            // self-distance differences but not separation).
+            double sameSideBonus = 0;
+            if (myPos != null && corpCenter != null) {
+                int corpX = corpCenter.getX(), corpY = corpCenter.getY();
+                int dx = myPos.getX() - corpX, dy = myPos.getY() - corpY;
+                int pdx = position.getX() - corpX, pdy = position.getY() - corpY;
+                // Dominant approach axis (the one with the bigger diff).
+                if (Math.abs(dx) >= Math.abs(dy)) {
+                    // X-axis approach: bonus if position's x sign matches player's
+                    if (dx != 0 && pdx != 0 && Math.signum(dx) == Math.signum(pdx)) {
+                        sameSideBonus = 5;
+                    }
+                } else {
+                    if (dy != 0 && pdy != 0 && Math.signum(dy) == Math.signum(pdy)) {
+                        sameSideBonus = 5;
+                    }
+                }
+            }
+
+            double score = separationScore - selfDistance + sameSideBonus;
 
             if (score > bestScore) {
                 bestScore = score;
@@ -4274,7 +4317,8 @@ public class Corp implements TribotScript {
         if (bestPosition == null) {
             bestPosition = dynamicPositions.get(0); // safety net
         }
-
+        Log.info("Picked Corp position " + bestPosition + " (score=" + bestScore
+                + ") from " + dynamicPositions.size() + " candidates");
         return bestPosition;
     }
 
@@ -8186,33 +8230,26 @@ public class Corp implements TribotScript {
 		// least one action OR an explicit visible/clickable state, so
 		// the label widget gets filtered out.
 		final String hostLower = hostName == null ? "" : hostName.toLowerCase();
-		// 1.9.19: target the widget at exact path [162, 39] per user.
-		// The widget's own text is "<col=000000>Last name:</col> TimeToAFK"
-		// (with HTML color tags). Strip tags, lowercase, check contains
-		// host name. If parent doesn't directly contain the name, walk
-		// children (the text might live in [162, 39, 0]). Drop the
-		// isVisible / hasAction filters from previous versions —
-		// they were over-filtering this widget.
+		// 1.9.20: target the CHILD at [162, 39, X] where the text actually
+		// lives — empty parent [162, 39] matched in 1.9.19 but clicking it
+		// fell through to a ground click. The user identified the text as
+		// living at [162, 39, 0]. Match any child of [162, 39] whose text
+		// (after stripping color tags) contains the host name, case-
+		// insensitive.
+		// 1.9.20: lock to the exact path [162, 39, 0]. User identified
+		// this as the first child of [162, 39] where the host name text
+		// lives. `length == 3` means "the path array has 3 elements"
+		// (root → child → grandchild) — that's the depth of [162, 39, 0].
+		// path[2] == 0 is the grandchild index — 0 = first child.
 		Optional<Widget> friendWidgetOpt = Query.widgets()
 				.inRoots(162)
-				.filter(w -> w.getIndexPath().length == 2
-						&& w.getIndexPath()[1] == 39)
+				.filter(w -> w.getIndexPath().length == 3
+						&& w.getIndexPath()[1] == 39
+						&& w.getIndexPath()[2] == 0)
 				.filter(w -> {
 					String raw = w.getText().orElse("");
 					String clean = raw.replaceAll("<[^>]*>", "").toLowerCase();
-					if (clean.contains(hostLower)) return true;
-					// Fallback: check children for the host text.
-					try {
-						List<Widget> children = w.getChildren();
-						if (children != null) {
-							for (Widget c : children) {
-								String cText = c.getText().orElse("")
-										.replaceAll("<[^>]*>", "").toLowerCase();
-								if (cText.contains(hostLower)) return true;
-							}
-						}
-					} catch (Throwable ignored) {}
-					return false;
+					return clean.contains(hostLower);
 				})
 				.findFirst();
 		if (friendWidgetOpt.isPresent()) {
@@ -8222,7 +8259,7 @@ public class Corp implements TribotScript {
 			Log.info("Matched friend shortcut widget path "
 					+ java.util.Arrays.toString(path) + " text=\"" + txt + "\"");
 		} else {
-			Log.info("No widget at [162, 39] matching host name " + hostName);
+			Log.info("No widget under [162, 39, *] matching host name " + hostName);
 		}
 
 		if (friendWidgetOpt.isPresent()) {
