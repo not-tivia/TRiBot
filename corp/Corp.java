@@ -3281,6 +3281,23 @@ public class Corp implements TribotScript {
      *  jumped to attacks it, then steps away so the core dies mid-air and
      *  doesn't respawn. Non-targeted bots hold the kill weapon ready. */
     private void handleAdvancedDarkCoreModern() {
+        // 1.9.64: turn auto-retaliate OFF for the duration of the core
+        // engagement. User: 'we eat cuz we are low then we click on
+        // the core and then our auto retaliate makes us hit the corp
+        // over and over again.' With auto-retaliate ON, Corp's next
+        // hit yanks the bot's target back to Corp the tick after we
+        // click the core, so the core attack never actually fires —
+        // bot just stands there auto-attacking Corp while the core
+        // lands. We turn it back on when the core is gone (after the
+        // 3s grace timer below).
+        try {
+            if (Combat.isAutoRetaliateOn()) {
+                Log.info("Dark core present — disabling auto-retaliate so "
+                        + "the core click sticks");
+                Combat.setAutoRetaliate(false);
+            }
+        } catch (Exception ignored) {}
+
         // 1.9.58: only eat when HEALTH IS CRITICAL during core. Pre-1.9.58
         // we eat-combo'd at HP <= INTERNAL_EMERGENCY_HP (50) AND at HP <=
         // eatHealthThreshold + 20 (~41). With Corp magic hits coming in
@@ -3327,6 +3344,13 @@ public class Corp implements TribotScript {
             Log.info("Dark core gone (>" + CORE_GRACE_MS
                     + "ms grace expired) - re-equipping main weapon");
             equipMainWeaponFast();
+            // 1.9.64: re-enable auto-retaliate now that the core's gone.
+            try {
+                if (!Combat.isAutoRetaliateOn()) {
+                    Log.info("Core gone — re-enabling auto-retaliate");
+                    Combat.setAutoRetaliate(true);
+                }
+            } catch (Exception ignored) {}
             currentState = BotState.FIGHTING_CORP;
             return;
         }
