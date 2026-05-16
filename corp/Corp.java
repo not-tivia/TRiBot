@@ -21,6 +21,32 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.13 (2026-05-16) - Four fixes after the 1.9.12 test:
+ *                         (a) Pool drink: left-click instead of right-click
+ *                             menu. interact("Drink") opens the right-click
+ *                             menu and selects "Drink"; if the menu rendering
+ *                             races against the click we could end up
+ *                             clicking the wrong option. The pool's default
+ *                             left-click IS "Drink" — pool.click() is simpler
+ *                             and less prone to misclicks.
+ *                         (b) hasAcceptableTeammatesInBossRoom required the
+ *                             bot to BE in the boss room before it would
+ *                             check for teammates there. Result: bot tele'd
+ *                             back from POH into the lobby, saw "no teammates
+ *                             in boss room" (because itself wasn't there),
+ *                             waited in lobby forever while teammates were
+ *                             already fighting Corp. Now checks each
+ *                             player's tile against the corpCave area
+ *                             regardless of where the bot itself is.
+ *                         (c) Removed Pool object name and Jewellery box
+ *                             name GUI fields. Detection is action-based
+ *                             ("Drink" / "Corporeal Beast") and works
+ *                             across all tiers — name was unused. Fields
+ *                             kept @Deprecated in settings for backward
+ *                             compatibility with old saved profiles.
+ *                         (d) W330 VALIDATE_POOL and TELE_TO_CORP cases
+ *                             also switched to action-based detection.
+ *                             isInOwnHouse() too.
  *   1.9.12 (2026-05-16) - After tele back from POH, ALWAYS go to
  *                         WAITING_FOR_TEAM. Pre-1.9.12 handleTeleportingBackToCorp
  *                         would loop straight back into PREPARING_RESTORATION_CYCLE
@@ -3253,14 +3279,13 @@ public class Corp implements TribotScript {
                 return;
 
             case VALIDATE_POOL:
-                String poolName = settings.poolName == null || settings.poolName.isEmpty()
-                        ? "Ornate rejuvenation pool" : settings.poolName;
-                if (Query.gameObjects().nameEquals(poolName).isAny()) {
-                    Log.info("W330: " + w330CurrentHost + " has " + poolName + " - proceeding");
+                // 1.9.13: action-based — any object with "Drink" is a pool.
+                if (Query.gameObjects().filter(o -> o.getActions().contains("Drink")).isAny()) {
+                    Log.info("W330: " + w330CurrentHost + " has a drinkable pool - proceeding");
                     w330Step = W330Step.USE_POOL;
                     return;
                 }
-                Log.warn("W330: " + w330CurrentHost + " missing " + poolName + " - trying another host");
+                Log.warn("W330: " + w330CurrentHost + " has no drinkable pool - trying another host");
                 exitRandomHouse();
                 w330Step = W330Step.ENTER_HOUSE;
                 return;
@@ -3272,10 +3297,8 @@ public class Corp implements TribotScript {
                 return;
 
             case TELE_TO_CORP:
-                // Prefer the host's ornate jewellery box (single click to Corp).
-                String boxName = settings.jewelleryBoxName == null || settings.jewelleryBoxName.isEmpty()
-                        ? "Ornate jewellery box" : settings.jewelleryBoxName;
-                if (Query.gameObjects().nameEquals(boxName).isAny()) {
+                // 1.9.13: action-based — any object with "Corporeal Beast" is a tele box.
+                if (Query.gameObjects().filter(o -> o.getActions().contains("Corporeal Beast")).isAny()) {
                     if (useOrnateJewelryBox() && isAtCorp()) {
                         w330Step = W330Step.HOP_HOME;
                         return;
@@ -4349,15 +4372,23 @@ public class Corp implements TribotScript {
      * Check if acceptable teammates are in the boss room
      */
     private boolean hasAcceptableTeammatesInBossRoom() {
-        // TODO: This would need to detect if teammates are specifically in boss room
-        // For now, check if they're nearby and Corp is present
-        if (!isInCorpBossRoom()) {
-            return false;
-        }
-
+        // 1.9.13: pre-1.9.13 this required the BOT to already be in the
+        // boss room before checking for teammates there — backwards. The
+        // bot would tele back from POH into Corp's lobby, find no
+        // teammates "in the boss room" (because itself wasn't there yet),
+        // and wait in lobby forever while teammates were already fighting
+        // Corp in the boss room.
+        // Now: check whether any acceptable teammate's TILE falls inside
+        // corpCave, regardless of where the bot itself is.
+        if (settings == null || settings.acceptableTeammates == null) return false;
         return Query.players()
                 .stream()
-                .anyMatch(player -> settings.acceptableTeammates.contains(player.getName()));
+                .filter(p -> p.getName() != null
+                        && settings.acceptableTeammates.contains(p.getName()))
+                .anyMatch(p -> {
+                    WorldTile t = p.getTile();
+                    return t != null && corpCave.contains(t);
+                });
     }
 
     /**
@@ -7913,10 +7944,12 @@ public class Corp implements TribotScript {
 		return false;
 	}
 
-	/** True if we're inside our own house — heuristic is the configured
-	 *  rejuvenation pool being visible (no friend-portal walk needed). */
+	/** True if we're inside our own house — heuristic is any drinkable pool
+	 *  being visible (no friend-portal walk needed). 1.9.13: action-based. */
 	private boolean isInOwnHouse() {
-		return Query.gameObjects().nameEquals(settings.poolName).findFirst().isPresent();
+		return Query.gameObjects()
+				.filter(o -> o.getActions().contains("Drink"))
+				.findFirst().isPresent();
 	}
 
 	/**
@@ -8063,13 +8096,13 @@ public class Corp implements TribotScript {
 	 * Simple ornate pool usage
 	 */
 	private boolean useOrnatePool() {
-		// 1.9.7.1: match by ACTION instead of name. Pools across tiers all
-		// expose the "Drink" action.
-		// 1.9.8: actually retry if stats don't restore — pre-1.9.8 the
-		// "Pool restoration timed out, but continuing" path teleported the
-		// bot back to Corp with 0% spec and low HP, where it instantly
-		// died. Now we retry up to 3 drink attempts, then bail out
-		// honestly via EMERGENCY_ESCAPE rather than teleing back un-restored.
+		// 1.9.7.1: match by ACTION ("Drink").
+		// 1.9.8: retry up to 3 times; refuse to tele back un-restored.
+		// 1.9.13: use LEFT-click (click()) instead of right-click menu
+		// (interact("Drink")). The pool's default left-click action is
+		// "Drink" — left-click avoids any chance of selecting the wrong
+		// option from the right-click menu (e.g. walk-here) when the
+		// menu rendering races against the click.
 		final int MAX_DRINK_ATTEMPTS = 3;
 		for (int attempt = 1; attempt <= MAX_DRINK_ATTEMPTS; attempt++) {
 			Optional<GameObject> poolOpt = Query.gameObjects()
@@ -8079,17 +8112,21 @@ public class Corp implements TribotScript {
 				Log.error("No drinkable pool found in render (attempt " + attempt + ")");
 				return false;
 			}
-			Log.info("Using " + poolOpt.get().getName()
-					+ " for restoration (attempt " + attempt + "/" + MAX_DRINK_ATTEMPTS + ")...");
+			GameObject pool = poolOpt.get();
+			Log.info("Left-clicking " + pool.getName()
+					+ " for restoration (attempt " + attempt + "/" + MAX_DRINK_ATTEMPTS + ")");
 
-			if (!poolOpt.get().interact("Drink")) {
-				Log.warn("Pool 'Drink' interact failed (attempt " + attempt + ")");
+			if (!pool.click()) {
+				Log.warn("Pool left-click failed (attempt " + attempt + ")");
 				Waiting.waitNormal(800, 200);
 				continue;
 			}
 
 			// Wait for restoration — full bar, full HP, full prayer.
-			boolean restored = Waiting.waitUntil(10000, () -> {
+			// 15s on attempt 1 (we may need to walk to the pool first); 10s
+			// for retries when we're already adjacent.
+			long waitMs = (attempt == 1) ? 15000 : 10000;
+			boolean restored = Waiting.waitUntil((int) waitMs, () -> {
 				boolean specOk = Combat.getSpecialAttackPercent() >= 100;
 				boolean hpOk = MyPlayer.getCurrentHealth() >= Skill.HITPOINTS.getActualLevel();
 				boolean prayerOk = Prayer.getPrayerPoints() >= Skill.PRAYER.getActualLevel();
@@ -8097,7 +8134,7 @@ public class Corp implements TribotScript {
 			});
 
 			if (restored) {
-				Log.info("Successfully restored at " + poolOpt.get().getName()
+				Log.info("Successfully restored at " + pool.getName()
 						+ " (spec=" + Combat.getSpecialAttackPercent()
 						+ "%, hp=" + MyPlayer.getCurrentHealth()
 						+ ", prayer=" + Prayer.getPrayerPoints() + ")");
@@ -8335,10 +8372,13 @@ public class Corp implements TribotScript {
         // use pohSource directly.
         public boolean useOwnHouse = false;
 
-        // poolName: name of the rejuvenation pool object in the house we're using.
-        // jewelleryBoxName: name of the jewellery-box object used to tele back to Corp.
-        public String poolName = "Ornate rejuvenation pool";
-        public String jewelleryBoxName = "Ornate jewellery box";
+        // 1.9.13: poolName / jewelleryBoxName retired. Pool detection now
+        // matches by ACTION ("Drink") and jewellery box by action
+        // ("Corporeal Beast"), so the name is irrelevant. Fields kept (not
+        // deleted) only for backwards compatibility with old saved profiles
+        // that still reference them; no production code reads them.
+        @Deprecated public String poolName = "";
+        @Deprecated public String jewelleryBoxName = "";
 
         // Wait at the pool for teammates with low spec before teleporting back.
         // Requires coordinatorEnabled. Useful when only one account owns the POH.
@@ -9191,8 +9231,9 @@ public class Corp implements TribotScript {
                 JCheckBox isPohHost = new JCheckBox(
                         "This account hosts the team's POH (publishes via coordinator)",
                         settings.isPohHost);
-                JTextField poolName = new JTextField(settings.poolName, 22);
-                JTextField jewelleryBoxName = new JTextField(settings.jewelleryBoxName, 22);
+                // 1.9.13: poolName / jewelleryBoxName GUI fields removed —
+                // detection is now action-based ("Drink" / "Corporeal Beast")
+                // and works across all pool/box tiers automatically.
                 JCheckBox waitForTeammateSpec = new JCheckBox(
                         "Wait at pool for teammates to refresh spec (coordinator)",
                         settings.waitForTeammateSpec);
@@ -9212,8 +9253,6 @@ public class Corp implements TribotScript {
                 teamTop.add(new JLabel("PoH source:"));        teamTop.add(pohSource);
                 teamTop.add(new JLabel("Friend's RSN:"));      teamTop.add(friendName);
                 teamTop.add(new JLabel("POH host role:"));     teamTop.add(isPohHost);
-                teamTop.add(new JLabel("Pool object name:"));  teamTop.add(poolName);
-                teamTop.add(new JLabel("Jewellery box name:"));teamTop.add(jewelleryBoxName);
                 teamTop.add(new JLabel("Coordinator:"));       teamTop.add(coordEnabled);
                 teamTop.add(new JLabel("Coordinator wait:"));  teamTop.add(waitForTeammateSpec);
                 teamTop.add(new JLabel("W330 return world (0 = remember):")); teamTop.add(designatedWorld);
@@ -9260,8 +9299,6 @@ public class Corp implements TribotScript {
                     friendName.setText(settings.friendName);
                     teammates.setText(String.join("\n", settings.acceptableTeammates));
                     isPohHost.setSelected(settings.isPohHost);
-                    poolName.setText(settings.poolName);
-                    jewelleryBoxName.setText(settings.jewelleryBoxName);
                     coordEnabled.setSelected(settings.coordinatorEnabled);
                     waitForTeammateSpec.setSelected(settings.waitForTeammateSpec);
                     designatedWorld.setValue(settings.designatedWorld);
@@ -9295,8 +9332,6 @@ public class Corp implements TribotScript {
                     settings.acceptableTeammates = Arrays.stream(teammates.getText().split("\\R"))
                             .map(String::trim).filter(s -> !s.isEmpty()).collect(Collectors.toList());
                     settings.isPohHost = isPohHost.isSelected();
-                    settings.poolName = poolName.getText().trim();
-                    settings.jewelleryBoxName = jewelleryBoxName.getText().trim();
                     settings.coordinatorEnabled = coordEnabled.isSelected();
                     settings.waitForTeammateSpec = waitForTeammateSpec.isSelected();
                     settings.designatedWorld = (Integer) designatedWorld.getValue();
