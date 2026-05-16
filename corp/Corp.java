@@ -2,7 +2,6 @@ package scripts.corp;
 
 import org.tribot.script.sdk.*;
 import org.tribot.script.sdk.input.Keyboard;
-import org.tribot.script.sdk.input.Mouse;
 import org.tribot.script.sdk.query.*;
 import org.tribot.script.sdk.script.TribotScriptManifest;
 import org.tribot.script.sdk.types.*;
@@ -22,6 +21,15 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.11.1 (2026-05-16) - Fix 1.9.11 compile error: Mouse.getPosition() and
+ *                           InventoryItem.getStackRectangle() aren't exposed
+ *                           in the public TRiBot SDK. Replaced "closest to
+ *                           mouse" with "closest by slot index" — InventoryItem
+ *                           DOES expose getIndex(), and the inventory is a
+ *                           4-wide grid so slot proximity correlates with
+ *                           on-screen distance. Captures the shark's slot
+ *                           index before clicking, then picks the karambwan
+ *                           with the closest abs(index - sharkSlot).
  *   1.9.11 (2026-05-16) - Two fixes after diagnosing the 1.9.10 typing bug:
  *                         (a) Friend-name typing dropped the first 4
  *                             characters. The chatbox dialog opens visually
@@ -6824,8 +6832,14 @@ public class Corp implements TribotScript {
         boolean ateShark = false;
         boolean ateKarambwan = false;
 
-        // Step 1: Eat shark first
+        // Step 1: Eat shark first. 1.9.11.1: capture the shark's slot index
+        // so we can pick the nearest karambwan slot afterward (minimizes
+        // mouse travel for the combo follow-up).
+        int sharkSlot = -1;
         Optional<InventoryItem> sharkOpt = Query.inventory().nameEquals("Shark").findFirst();
+        if (sharkOpt.isPresent()) {
+            sharkSlot = sharkOpt.get().getIndex();
+        }
         if (sharkOpt.isPresent() && sharkOpt.get().click("Eat")) {
             ateShark = true;
             Log.info("Emergency: Ate Shark");
@@ -6841,13 +6855,14 @@ public class Corp implements TribotScript {
         }
 
         // Step 2: Eat karambwan immediately after.
-        // 1.9.11: pick the karambwan slot CLOSEST to the current mouse pos.
-        // After the shark click the mouse is sitting on the shark slot; the
-        // nearest karambwan minimizes mouse-travel time, helping both eats
-        // land in the same game tick. Pre-1.9.11 we just took the first
-        // karambwan returned by Query.inventory(), which is typically the
-        // top-left slot — could be far from the shark we just clicked.
-        Optional<InventoryItem> karambwanOpt = pickClosestKarambwanToMouse();
+        // 1.9.11.1: pick the karambwan whose slot index is closest to the
+        // shark slot. After the shark click the cursor sits over that slot,
+        // so the nearest karambwan minimizes mouse travel — helps both
+        // eats land in the same game tick. Falls back to naive pick if we
+        // didn't capture the shark slot.
+        Optional<InventoryItem> karambwanOpt = (sharkSlot >= 0)
+                ? pickClosestKarambwanToSlot(sharkSlot)
+                : Query.inventory().nameEquals("Cooked karambwan").findFirst();
         if (karambwanOpt.isPresent() && karambwanOpt.get().click("Eat")) {
             ateKarambwan = true;
             Log.info("Emergency: Ate Karambwan");
@@ -7147,41 +7162,30 @@ public class Corp implements TribotScript {
         ownedSpecWeaponsCache = null;
     }
 
-    /** 1.9.11: pick the Cooked karambwan whose inventory slot is closest to
-     *  the current mouse position. After clicking shark the cursor is on the
-     *  shark slot — the nearest karambwan minimizes mouse travel, keeping
-     *  both eats in the same tick. Falls back to Query.inventory().findFirst()
-     *  if the SDK's getRectangle / Mouse.getPosition aren't available at
-     *  runtime (defensive — the SDK has been stable but reflection guards
-     *  cheaply protect against silent NPEs). */
-    private Optional<InventoryItem> pickClosestKarambwanToMouse() {
-        try {
-            java.awt.Point mousePos = Mouse.getPosition();
-            if (mousePos == null) {
-                return Query.inventory().nameEquals("Cooked karambwan").findFirst();
+    /** 1.9.11: pick the Cooked karambwan whose inventory slot index is
+     *  closest to the given shark slot. The inventory is a 4-wide grid, so
+     *  slot-index proximity correlates with on-screen distance (an exact
+     *  Manhattan distance over (idx/4, idx%4) would be marginally better
+     *  but |a-b| is a good enough proxy and avoids the awkward grid math).
+     *  After clicking shark the cursor sits over that slot — eating the
+     *  nearest karambwan keeps the second click on the same row/column and
+     *  helps both eats land in the same game tick.
+     *  Mouse.getPosition() isn't exposed in the public SDK, so we can't do
+     *  literal cursor-distance; slot proximity is the best available proxy. */
+    private Optional<InventoryItem> pickClosestKarambwanToSlot(int referenceSlot) {
+        List<InventoryItem> candidates = Query.inventory()
+                .nameEquals("Cooked karambwan").toList();
+        if (candidates.isEmpty()) return Optional.empty();
+        InventoryItem best = candidates.get(0);
+        int bestDist = Math.abs(best.getIndex() - referenceSlot);
+        for (InventoryItem item : candidates) {
+            int d = Math.abs(item.getIndex() - referenceSlot);
+            if (d < bestDist) {
+                bestDist = d;
+                best = item;
             }
-            List<InventoryItem> candidates = Query.inventory()
-                    .nameEquals("Cooked karambwan").toList();
-            InventoryItem best = null;
-            double bestDist = Double.MAX_VALUE;
-            for (InventoryItem item : candidates) {
-                try {
-                    java.awt.Rectangle r = item.getStackRectangle();
-                    if (r == null) continue;
-                    double dx = (r.getX() + r.getWidth() / 2.0) - mousePos.getX();
-                    double dy = (r.getY() + r.getHeight() / 2.0) - mousePos.getY();
-                    double d = Math.sqrt(dx * dx + dy * dy);
-                    if (d < bestDist) {
-                        bestDist = d;
-                        best = item;
-                    }
-                } catch (Throwable ignored) { /* fall through */ }
-            }
-            if (best != null) return Optional.of(best);
-        } catch (Throwable ignored) {
-            // SDK shape changed or runtime issue — fall back to naive pick.
         }
-        return Query.inventory().nameEquals("Cooked karambwan").findFirst();
+        return Optional.of(best);
     }
 
     /** 1.9.9: sum of melee combat XP (Attack + Strength + Defence + Hitpoints).
