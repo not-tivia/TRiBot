@@ -6816,9 +6816,19 @@ public class Corp implements TribotScript {
     // ========== FEROX ENCLAVE METHODS ==========
 
     private boolean needsPoolRestoration() {
+        // 1.9.57: dropped the spec-energy gate. User: 'if we have full hp
+        // and prayer dont even touch the pool.' Pre-1.9.57 we also
+        // returned true when spec < 100% — but after the pool drink
+        // restored HP/prayer to max, spec was still typically partial,
+        // so on the next handleBankingAndHealing tick this would return
+        // true again, the bot would walk back to the pool, drink (no-op
+        // because HP/prayer maxed), then back to bank, then back to
+        // pool — user described: 'we go to the pool and then click on
+        // the bank and then click on the pool again and just never
+        // move.' Now only HP/prayer trigger the pool; spec refills
+        // naturally during travel back to Corp + via specs we'll fire.
         return MyPlayer.getCurrentHealth() < Skill.HITPOINTS.getActualLevel() ||
-                Prayer.getPrayerPoints() < Skill.PRAYER.getActualLevel() ||
-                Combat.getSpecialAttackPercent() < 100;
+                Prayer.getPrayerPoints() < Skill.PRAYER.getActualLevel();
     }
 
     private boolean useRestorePool() {
