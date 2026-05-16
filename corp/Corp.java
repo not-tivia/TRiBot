@@ -7810,13 +7810,27 @@ public class Corp implements TribotScript {
                     && !chosenSpecWeapon.equals(previous)) {
                 Log.info("Phase target met for " + previous
                         + " — rotating spec weapon to " + chosenSpecWeapon);
-                // Equip the new weapon immediately so it's ready for the
-                // next bar's first spec. Pre-1.9.17 we deferred this to
-                // handleSpecialAttack but that only runs when shouldUseSpecialAttack
-                // returns true — if the bot gets stuck eating between bars,
-                // the equip never happens.
-                if (Inventory.contains(chosenSpecWeapon)) {
+                // 1.9.35: only equip the rotated weapon if we still have
+                // energy to fire its spec right now. Otherwise we'll hit
+                // PREPARING_RESTORATION_CYCLE on the next tick — teleport
+                // FIRST, equip on return (handleSpecialAttack equips at
+                // line ~6216 when the spec weapon isn't on yet). Pre-1.9.35
+                // we equipped the new weapon at 0% energy, immediately ran
+                // a POH cycle, and if the host was offline the bot was
+                // already stuck with the wrong weapon for the fallback
+                // melee finish. User rule: "teleport before switching
+                // weapons. as soon as our specs are dumped we insta tele
+                // UNLESS we are going from our 2nd/3rd tier to our non
+                // special weapons." Going to non-spec is the desired==null
+                // case (handled by refreshSpecWeaponForPhase returning
+                // false elsewhere), not this branch.
+                if (Combat.getSpecialAttackPercent() >= getMinSpecEnergy()
+                        && Inventory.contains(chosenSpecWeapon)) {
                     equipSpecWeapon();
+                } else {
+                    Log.info("Deferring " + chosenSpecWeapon
+                            + " equip until after POH restoration (energy "
+                            + Combat.getSpecialAttackPercent() + "%)");
                 }
             }
         } else if (System.currentTimeMillis() > pendingHitDeadline) {
