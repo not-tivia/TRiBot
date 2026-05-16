@@ -8597,33 +8597,41 @@ public class Corp implements TribotScript {
 		}
 		Log.info("Clicked 'Friend's house', waiting for dialog...");
 
-		// 1.9.35.1: detect the dialog by looking for ITS widgets — the
-		// friend shortcut at [162, 39, *] or the name-input field at
-		// [162, 44]. Pre-1.9.35.1 we used Chatbox.isOpen() but the user
-		// confirmed the POH host has never been offline yet the bot kept
-		// reporting "did not open within 5s" — meaning Chatbox.isOpen()
-		// returns false even when the friend's-house modal IS open.
-		// Different widget root than Chatbox's. Wait up to 5s for the
-		// dialog widgets themselves, then a brief settle so children
-		// populate their bounding rectangles before handleFriendNameDialog
-		// tries to read text from them.
-		boolean dialogOpened = Waiting.waitUntil(5000, () -> {
-			boolean inputField = Query.widgets()
-					.inRoots(162)
-					.filter(w -> w.getIndexPath().length == 2
-							&& w.getIndexPath()[1] == 44)
-					.findFirst().isPresent();
-			if (inputField) return true;
-			boolean friendShortcut = Query.widgets()
-					.inRoots(162)
-					.filter(w -> w.getIndexPath().length >= 2
-							&& w.getIndexPath()[1] == 39)
-					.findFirst().isPresent();
-			return friendShortcut;
+		// 1.9.35.2: detect the dialog by widget TEXT content under root 162
+		// rather than by IndexPath. User confirmed via widget inspector
+		// screenshot that the dialog opens correctly (162.43 = "Enter name:"
+		// and 162.39 = "Last name: <host>") but 1.9.35.1's IndexPath-based
+		// filters never fired — likely because getIndexPath() in this SDK
+		// returns the path WITHIN the root (e.g. [39] not [162, 39]) so
+		// length==2 && [1]==X conditions never matched. Text-based detection
+		// is index-path agnostic and works whatever the SDK encodes:
+		//   - "Enter name:" is the dialog's static prompt label
+		//   - "Last name:" prefix is the host-shortcut row
+		// Either being present in root 162 means the dialog is open.
+		final String hostLower2 = getEffectiveFriendName() == null
+				? "" : getEffectiveFriendName().toLowerCase();
+		boolean dialogOpened = Waiting.waitUntil(8000, () -> {
+			try {
+				return Query.widgets()
+						.inRoots(162)
+						.filter(w -> {
+							String raw = w.getText().orElse("");
+							if (raw.isEmpty()) return false;
+							String clean = raw.replaceAll("<[^>]*>", "").toLowerCase();
+							return clean.contains("enter name")
+									|| clean.contains("last name")
+									|| (!hostLower2.isEmpty() && clean.contains(hostLower2));
+						})
+						.findFirst()
+						.isPresent();
+			} catch (Exception e) {
+				return false;
+			}
 		});
 		if (!dialogOpened) {
-			Log.warn("Friend's-house dialog did not open within 5s "
-					+ "(neither [162, 44] input nor [162, 39, *] shortcut found)");
+			Log.warn("Friend's-house dialog did not open within 8s "
+					+ "(no 'Enter name:' / 'Last name:' / host-name text "
+					+ "found anywhere under root 162)");
 			return false;
 		}
 		Waiting.waitNormal(700, 200);
