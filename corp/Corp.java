@@ -9017,24 +9017,26 @@ public class Corp implements TribotScript {
 			if (inputStripped.equals(hostStripped)) {
 				Log.info("Friend-house input already correct (\"" + existingInput
 						+ "\") — submitting");
-				// 1.9.46: try the 'Last name:' shortcut FIRST (clicking
-				// it submits without needing canvas focus), Enter as a
-				// fallback. Pre-1.9.46 we only sent Enter — and Enter
-				// silently no-ops if the canvas has lost focus (which
-				// can happen after the portal click context switch).
-				// User saw attempt 1 fail after 10s of waiting; attempt
-				// 2 succeeded immediately.
+				// 1.9.50: input populated doesn't always mean the shortcut
+				// widget is renderable yet. Attempt 1 in user log showed
+				// "No shortcut widget — pressing Enter" then 5s timeout;
+				// attempt 2 found the shortcut and entered immediately.
+				// Conclusion: input renders BEFORE the shortcut, our
+				// "dialog children ready" predicate fires too early when
+				// only the input is up. Now: poll for the shortcut for up
+				// to 3s. If it appears, click it. If not, fall back to
+				// Enter as before.
+				final String hn = hostName;
+				Waiting.waitUntil(3000, () ->
+						findFriendHouseShortcutByText(hn).isPresent());
 				Optional<Widget> shortcutByText = findFriendHouseShortcutByText(hostName);
 				if (shortcutByText.isPresent()) {
 					Log.info("Clicking 'Last name:' shortcut to submit");
 					shortcutByText.get().click();
 				} else {
-					Log.info("No shortcut widget — pressing Enter");
+					Log.info("Shortcut widget never rendered — pressing Enter");
 					try { Keyboard.pressEnter(); } catch (Exception ignored) {}
 				}
-				// 1.9.46: shorter wait per user — 5s not 10s. If it didn't
-				// work, return false and let the outer retry click the
-				// portal again.
 				return Waiting.waitUntil(5000, () -> isInFriendHouse());
 			} else {
 				Log.info("Friend-house input has stale/wrong text \""
