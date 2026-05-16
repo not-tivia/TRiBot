@@ -21,6 +21,26 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.10 (2026-05-16) - Two fixes after the 1.9.9 test:
+ *                         (a) Restoration failure fallback. When house entry
+ *                             fails MAX_HOUSE_ENTRY_ATTEMPTS times (e.g. the
+ *                             POH host is offline), the bot was left
+ *                             standing at the friend's-house portal area
+ *                             and transitioning to WAITING_FOR_TEAM — which
+ *                             expects to be in Corp's lobby, not outside
+ *                             the cave. Bot waited forever for teammates.
+ *                             Now falls back to a Games-necklace tele back
+ *                             to Corp; if no necklace, banks.
+ *                         (b) Combo-eat timing tightened (100-300ms → 40-80ms).
+ *                             Karambwan in OSRS bypasses the standard eat
+ *                             cooldown so both heals can land in the SAME
+ *                             game tick — but only if the karambwan click
+ *                             is fast. Pre-1.9.10 wait was long enough to
+ *                             push karambwan into the next tick, halving
+ *                             the burst-heal speed. Combat-log evidence:
+ *                             bot was emergency-combo-eating twice between
+ *                             specs because single-tick burst wasn't
+ *                             outpacing Corp damage.
  *   1.9.9 (2026-05-16) - XP-based spec hit detection. Pre-1.9.9 every spec
  *                        fire (hit OR miss) bumped the phase counter, so
  *                        the bot would rotate weapons after 4 spec ATTEMPTS
@@ -6790,8 +6810,14 @@ public class Corp implements TribotScript {
             ateShark = true;
             Log.info("Emergency: Ate Shark");
 
-            // Brief delay before karambwan (combo eating timing)
-            Waiting.waitUniform(100, 300);
+            // 1.9.10: tightened from 100-300ms. Karambwan in OSRS bypasses
+            // the standard eat cooldown so both heals can land in the SAME
+            // tick — but only if the karambwan click happens fast. The
+            // pre-1.9.10 wait often pushed karambwan into the next tick,
+            // doubling the time-to-full-heal. 40-80ms is long enough for
+            // TRiBot's click pipeline to flush but short enough to keep
+            // both eats in one game tick.
+            Waiting.waitUniform(40, 80);
         }
 
         // Step 2: Eat karambwan immediately after
@@ -7539,8 +7565,24 @@ public class Corp implements TribotScript {
 
 		if (currentHouseEntryAttempts >= MAX_HOUSE_ENTRY_ATTEMPTS) {
 			Log.error("Exceeded maximum house entry attempts - ending restoration");
+			// 1.9.10: route back to Corp via Games necklace instead of stranding
+			// the bot at the friend's-house portal area waiting for teammates
+			// that aren't there. Pre-1.9.10 transitioned to WAITING_FOR_TEAM
+			// directly, but WAITING_FOR_TEAM expects the bot to be in Corp's
+			// lobby — outside the cave, the team-detection logic finds no
+			// acceptable teammates and the bot waits forever.
 			emergencyResetPOHSystem();
-			currentState = BotState.WAITING_FOR_TEAM;
+			Log.warn("Restoration failed (host probably offline). Falling back to "
+					+ "Games-necklace tele to Corp and finishing in melee.");
+			Optional<InventoryItem> necklace = Query.inventory()
+					.nameContains("Games necklace").findFirst();
+			if (necklace.isPresent() && necklace.get().click("Corporeal Beast")) {
+				Waiting.waitUntil(10000, () -> isAtCorp());
+				currentState = BotState.WAITING_FOR_TEAM;
+			} else {
+				Log.error("No Games necklace for fallback tele — banking trip");
+				currentState = BotState.BANKING_AND_HEALING;
+			}
 			return;
 		}
 
