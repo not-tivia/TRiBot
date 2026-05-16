@@ -5825,28 +5825,32 @@ public class Corp implements TribotScript {
         int dx = myPos.getX() - corpCenter.getX();
         int dy = myPos.getY() - corpCenter.getY();
         if (dx == 0 && dy == 0) return null;
-        // Step 3 tiles from corp center along the DOMINANT axis (E/W or
-        // N/S whichever is bigger). 3 because corp is 5x5 -> center to
-        // edge = 2 tiles, so center+3 = 1 tile outside hitbox = melee
-        // range. If equal magnitudes, use both (diagonal step).
+        // 1.9.61: step 4 tiles from corp center (was 3). Corp moves a tile
+        // or two between snapshot and walk arrival; a 3-tile offset put
+        // us 1 tile outside hitbox at compute time but inside the new
+        // hitbox by the time we got there. User died from stomp damage
+        // because of this — log showed corp center shifting from
+        // (2989,4391) to (2987,4389) between getDynamicCorpPositions
+        // and isPositionSafeFromCorpHitbox. 4-tile offset gives 2 tiles
+        // of buffer, so Corp can move up to 2 tiles and we're still
+        // outside.
         int sx = (dx == 0) ? 0 : Integer.signum(dx);
         int sy = (dy == 0) ? 0 : Integer.signum(dy);
         WorldTile candidate;
         if (Math.abs(dx) >= Math.abs(dy)) {
-            candidate = new WorldTile(corpCenter.getX() + 3 * sx,
+            candidate = new WorldTile(corpCenter.getX() + 4 * sx,
                     corpCenter.getY(), corpCenter.getPlane());
         } else {
             candidate = new WorldTile(corpCenter.getX(),
-                    corpCenter.getY() + 3 * sy, corpCenter.getPlane());
+                    corpCenter.getY() + 4 * sy, corpCenter.getPlane());
         }
         if (corpArea.contains(candidate)) return null;
         if (lineCrossesCorp(myPos, candidate, corpArea)) {
-            // Dominant axis failed — try the other axis.
             if (Math.abs(dx) >= Math.abs(dy) && sy != 0) {
                 candidate = new WorldTile(corpCenter.getX(),
-                        corpCenter.getY() + 3 * sy, corpCenter.getPlane());
+                        corpCenter.getY() + 4 * sy, corpCenter.getPlane());
             } else if (sx != 0) {
-                candidate = new WorldTile(corpCenter.getX() + 3 * sx,
+                candidate = new WorldTile(corpCenter.getX() + 4 * sx,
                         corpCenter.getY(), corpCenter.getPlane());
             }
             if (corpArea.contains(candidate)) return null;
@@ -6022,6 +6026,37 @@ public class Corp implements TribotScript {
 				} else {
 					Log.warn("No safe corner waypoint found — falling back "
 							+ "to click-Attack on Corp (game pathfinder)");
+					if (corp.interact("Attack")) {
+						return Waiting.waitUntil(6000, () ->
+								isPlayerInCombat() || MyPlayer.isAnimating());
+					}
+					return false;
+				}
+			}
+			// 1.9.61: LIVE re-check right before walking. Corp moves a
+			// tile or two between snapshot and walk arrival; if it
+			// shifted into our chosen tile, we'd walk straight into
+			// the hitbox and stomp-die. User: 'we should never get
+			// killed while running into the room.' Re-fetch corp and
+			// abort if bestPosition is now inside its hitbox OR the
+			// straight line still crosses.
+			Optional<Npc> corpLive = Query.npcs().nameEquals(CORPOREAL_BEAST).findFirst();
+			if (corpLive.isPresent()) {
+				Area liveArea = corpLive.get().getArea();
+				if (liveArea != null && liveArea.contains(bestPosition)) {
+					Log.warn("Corp moved INTO target tile " + bestPosition
+							+ " — aborting walk, click-Attack instead");
+					if (corp.interact("Attack")) {
+						return Waiting.waitUntil(6000, () ->
+								isPlayerInCombat() || MyPlayer.isAnimating());
+					}
+					return false;
+				}
+				if (liveArea != null && myPos != null
+						&& lineCrossesCorp(myPos, bestPosition, liveArea)) {
+					Log.warn("Corp shifted — straight line to "
+							+ bestPosition + " crosses hitbox, "
+							+ "click-Attack instead");
 					if (corp.interact("Attack")) {
 						return Waiting.waitUntil(6000, () ->
 								isPlayerInCombat() || MyPlayer.isAnimating());
