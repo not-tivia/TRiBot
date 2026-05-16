@@ -21,6 +21,33 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.17 (2026-05-16) - Three fixes after the 1.9.16 test:
+ *                         (a) Phase rotation timing. The in-line detector
+ *                             was calling refreshSpecWeaponForPhase BEFORE
+ *                             recordSpecUsed (deferred to next tick via
+ *                             pending XP check). Rotation saw the OLD
+ *                             phase count and missed the 4th-spec trigger.
+ *                             Moved rotation into processPendingSpecHit,
+ *                             AFTER recordSpecUsed runs. Also now equips
+ *                             the new weapon immediately on rotation so
+ *                             the next bar fires with the right weapon
+ *                             instead of waiting for handleSpecialAttack
+ *                             (which may not run if bot's stuck eating).
+ *                         (b) Vengeance no-op during pre-engagement and
+ *                             spec-dump phases. User: "we still veng and
+ *                             do things we dont want to do until we
+ *                             actually start killing it outside of spec
+ *                             dumping." handleReadyForFirstCast now
+ *                             returns immediately; vengeance only fires
+ *                             during ACTIVE_CASTING (after we've taken
+ *                             damage in real melee), which is what
+ *                             updateHealthTracking switches us to once
+ *                             HP drops.
+ *                         (c) Friend-widget shortcut now targets the
+ *                             user's exact path [162, 39] (parent
+ *                             widget), not just any widget with text +
+ *                             actions. Verifies host text in the widget
+ *                             or any child.
  *   1.9.16 (2026-05-16) - Two flow fixes after the 1.9.15 test:
  *                         (a) Prep now runs IN PARALLEL with the walk to
  *                             the boss room. Pre-1.9.16 handleEnteringCombat
@@ -2387,10 +2414,12 @@ public class Corp implements TribotScript {
             Prayer.enableQuickPrayer();
         }
         prepareSpecWeaponInLobby();
-        // Veng cast lands right as we arrive at Corp — heal active when
-        // first hit lands. (handleVengeanceLogic gates on useVengeance
-        // and rune availability internally.)
-        handleVengeanceLogic();
+        // 1.9.17: removed veng cast from handleEnteringCombat. User said
+        // "we still veng and do things we dont want to do until we actually
+        // start killing it outside of spec dumping." Vengeance heals fade
+        // during pre-engagement walk + spec dump anyway. The veng cast now
+        // only fires during ACTIVE_CASTING (after we've taken damage in
+        // real melee combat), gated by handleVengeanceLogic itself.
 
         // Now wait for arrival before engaging.
         if (!isInCorpBossRoom()) {
@@ -2790,26 +2819,10 @@ public class Corp implements TribotScript {
                 pendingHitDeadline = System.currentTimeMillis() + HIT_CONFIRM_TIMEOUT_MS;
             }
 
-            // 1.9.5: phase rotation. If this spec pushed us past a phase
-            // target, update chosenSpecWeapon to the next-phase weapon
-            // (Elder maul → Arclight → BGS).
-            // 1.9.8: do NOT equip the new weapon here. The rotation always
-            // happens at energy 0 (we just spent the last spec of the bar),
-            // so we can't fire on the new weapon this bar anyway. Equipping
-            // Arclight while still in the boss room wastes 2 seconds of
-            // swap animation during which Corp keeps hitting. The actual
-            // equip happens at the next bar via handleSpecialAttack which
-            // already equips chosenSpecWeapon if not on.
-            String previousSpecWeapon = chosenSpecWeapon;
-            refreshSpecWeaponForPhase();
-            boolean phaseRotated = chosenSpecWeapon != null
-                    && previousSpecWeapon != null
-                    && !chosenSpecWeapon.equals(previousSpecWeapon);
-            if (phaseRotated) {
-                Log.info("Phase target met for " + previousSpecWeapon
-                        + " — chosenSpecWeapon now " + chosenSpecWeapon
-                        + " (equip deferred to next bar)");
-            }
+            // 1.9.17: phase rotation moved to processPendingSpecHit — it
+            // needs to run AFTER recordSpecUsed (which itself is deferred
+            // until XP confirms hit). Doing it here was running on a stale
+            // count, missing the 4th-spec rotation trigger.
 
             if (canFireAnotherSpecOnThisBar()) {
                 Log.info("Energy + phase targets allow another spec — re-activating spec for next hit");
@@ -4646,19 +4659,16 @@ public class Corp implements TribotScript {
 
     // ========== STATE HANDLERS ==========
     private void handleReadyForFirstCast(boolean bossAlive) {
-        // Can cast when: boss is dead OR we're in lobby
-        boolean canCastNow = !bossAlive || isInCorpLobby();
-
-        // Additional check: don't cast if we recently cast and no damage taken yet
-        boolean recentlyCastWithoutDamage = hasRecentVengeanceCastWithoutDamage();
-
-        if (canCastNow && canCastVengeance() && !recentlyCastWithoutDamage) {
-            if (castVengeance()) {
-                Log.info("Cast first vengeance (ready state) - will protect until first damage taken");
-            }
-        } else if (recentlyCastWithoutDamage) {
-            Log.debug("Skipping vengeance cast - recently cast and no damage taken yet");
-        }
+        // 1.9.17: don't cast vengeance during pre-engagement or spec-dump
+        // phase. User said: "we still veng and do things we dont want to
+        // do until we actually start killing it outside of spec dumping."
+        // The first-cast lobby trigger would burn vengeance HP on damage
+        // we never take (lobby is safe, spec-dump bot isn't melee-tanking
+        // Corp). ACTIVE_CASTING state (after we've taken real damage) is
+        // where vengeance belongs. Effectively makes READY_FOR_FIRST_CAST
+        // a no-op until updateHealthTracking sees HP drop and switches us
+        // to ACTIVE_CASTING.
+        return;
     }
 
     private boolean hasRecentVengeanceCastWithoutDamage() {
@@ -7353,6 +7363,29 @@ public class Corp implements TribotScript {
             Log.info("Spec HIT confirmed via XP delta +"
                     + (nowXp - pendingHitXpBaseline) + " for " + pendingHitWeapon);
             pendingHitWeapon = null;
+
+            // 1.9.17: phase rotation moved here from the in-line detector.
+            // recordSpecUsed has now incremented the per-kill phase counter
+            // (was previously deferred to this tick), so refreshSpecWeaponForPhase
+            // sees the updated count and rotates correctly when the 4th
+            // phase-1 hit confirms. Pre-1.9.17 the rotation ran BEFORE
+            // recordSpecUsed (one tick early), seeing count=3 instead of 4,
+            // and the bot stayed on Elder maul forever.
+            String previous = chosenSpecWeapon;
+            refreshSpecWeaponForPhase();
+            if (chosenSpecWeapon != null && previous != null
+                    && !chosenSpecWeapon.equals(previous)) {
+                Log.info("Phase target met for " + previous
+                        + " — rotating spec weapon to " + chosenSpecWeapon);
+                // Equip the new weapon immediately so it's ready for the
+                // next bar's first spec. Pre-1.9.17 we deferred this to
+                // handleSpecialAttack but that only runs when shouldUseSpecialAttack
+                // returns true — if the bot gets stuck eating between bars,
+                // the equip never happens.
+                if (Inventory.contains(chosenSpecWeapon)) {
+                    equipSpecWeapon();
+                }
+            }
         } else if (System.currentTimeMillis() > pendingHitDeadline) {
             Log.info("Spec MISSED (no XP delta after "
                     + HIT_CONFIRM_TIMEOUT_MS + "ms) for " + pendingHitWeapon
@@ -8103,26 +8136,32 @@ public class Corp implements TribotScript {
 		// least one action OR an explicit visible/clickable state, so
 		// the label widget gets filtered out.
 		final String hostLower = hostName == null ? "" : hostName.toLowerCase();
-		// 1.9.16.2: use the Query-builder .isVisible() filter (same pattern
-		// castVengeanceWidget uses). Widget.isHidden() and
-		// Widget.isBeingDrawn() aren't public on this SDK build despite
-		// appearing in the obfuscated strings dump.
+		// 1.9.17: try the user-supplied exact path [162, 39] first. User
+		// said: "it should be 162.39 162.39[0] Chatbox.MES_LAYER 'Last
+		// name: timetoafk'". The parent widget [162, 39] is the clickable
+		// shortcut; [162, 39, 0] is just the text child inside it.
 		Optional<Widget> friendWidgetOpt = Query.widgets()
 				.inRoots(162)
 				.isVisible()
+				.filter(w -> w.getIndexPath().length == 2
+						&& w.getIndexPath()[1] == 39)
 				.filter(w -> {
+					// Verify the host text is in this widget or any child.
 					String raw = w.getText().orElse("");
 					String clean = raw.replaceAll("<[^>]*>", "").toLowerCase();
-					return clean.contains(hostLower);
-				})
-				.filter(w -> {
-					// Require an action — text-only label widgets have
-					// none and clicking them ground-clicks.
+					if (clean.contains(hostLower)) return true;
+					// Check children for the text label.
 					try {
-						return w.getActions() != null && !w.getActions().isEmpty();
-					} catch (Throwable ignored) {
-						return false;
-					}
+						List<Widget> children = w.getChildren();
+						if (children != null) {
+							for (Widget c : children) {
+								String cText = c.getText().orElse("")
+										.replaceAll("<[^>]*>", "").toLowerCase();
+								if (cText.contains(hostLower)) return true;
+							}
+						}
+					} catch (Throwable ignored) {}
+					return false;
 				})
 				.findFirst();
 
