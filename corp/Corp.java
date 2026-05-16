@@ -21,6 +21,27 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.14 (2026-05-16) - Three fixes:
+ *                         (a) Vengeance now identified by NAME, not by
+ *                             fixed widget path. Pre-1.9.14 we trusted
+ *                             indexPath[1] == 142 to be Vengeance Self,
+ *                             but the spellbook widget tree shifts between
+ *                             game versions/pages; on this user's client
+ *                             [218, 142] is Ice Plateau Teleport. Bot was
+ *                             teleporting to Ice Plateau instead of
+ *                             casting Vengeance. Now samples getName /
+ *                             getComponentName / getText and requires
+ *                             "vengeance" in at least one of them, while
+ *                             still excluding "other".
+ *                         (b) 700±200ms settle delay before clicking the
+ *                             pool. Just-arrived players sometimes see the
+ *                             pool object on the next render tick after
+ *                             the player tile updates; clicking too early
+ *                             can miss the object and hit empty ground
+ *                             (walk-here).
+ *                         (c) Same settle delay before clicking the Ferox
+ *                             bank chest (both in the regular banking
+ *                             path and in death-recovery WITHDRAW step).
  *   1.9.13 (2026-05-16) - Four fixes after the 1.9.12 test:
  *                         (a) Pool drink: left-click instead of right-click
  *                             menu. interact("Drink") opens the right-click
@@ -1555,17 +1576,21 @@ public class Corp implements TribotScript {
     private boolean isVengeanceSelfWidget(Widget w) {
         if (w == null) return false;
         if (!w.getActions().contains("Cast")) return false;
-        // 1.9.3: don't require text to contain "vengeance". Lunar spellbook
-        // widgets are sprite-based and may return empty text via getText().
-        // The path filter (root 218, child 142) already uniquely identifies
-        // the Vengeance Self spell — the pre-1.9.3 text-contains check was
-        // rejecting the legitimate widget when text was empty, causing
-        // isOnLunarSpellbook() to return false and the entire vengeance
-        // system to silently skip every cast for the session. Keep the
-        // "other" guard as a belt-and-suspenders check in case any
-        // Vengeance Other widget ever shares the path.
-        String raw = w.getText().orElse("");
-        String clean = raw.replaceAll("<[^>]*>", "").trim().toLowerCase();
+        // 1.9.14: identify Vengeance Self by NAME instead of by fixed widget
+        // path. Pre-1.9.14 we trusted indexPath[1] == 142 to be Vengeance
+        // Self, but the widget tree shifts between game versions/spellbook
+        // pages and on this user's client 142 is actually Ice Plateau
+        // Teleport — bot kept teleporting to Ice Plateau instead of casting
+        // Vengeance. Now we sample every name source the SDK exposes
+        // (getName / getComponentName / getText) and require "vengeance"
+        // appear in at least one of them. Vengeance Other is excluded by
+        // the "other" check.
+        String combined = "";
+        try { combined += " " + Optional.ofNullable(w.getName()).orElse(""); } catch (Throwable ignored) {}
+        try { combined += " " + Optional.ofNullable(w.getComponentName()).orElse(""); } catch (Throwable ignored) {}
+        combined += " " + w.getText().orElse("");
+        String clean = combined.replaceAll("<[^>]*>", "").trim().toLowerCase();
+        if (!clean.contains("vengeance")) return false;
         if (clean.contains("other")) return false;
         return true;
     }
@@ -1575,21 +1600,22 @@ public class Corp implements TribotScript {
         GameTab.MAGIC.open();
         Waiting.waitUntil(2000, () -> GameTab.MAGIC.isOpen());
 
-
-        // Find and click the widget
+        // 1.9.14: search all widgets in the spellbook root by NAME, not by
+        // fixed path. childIndex parameter is retained but no longer used
+        // as a filter — kept for log-only context.
         Optional<Widget> vengeanceWidget = Query.widgets()
                 .inRoots(218)
-                .filter(w -> w.getIndexPath().length >= 2 && w.getIndexPath()[1] == childIndex)
                 .filter(this::isVengeanceSelfWidget)
                 .isVisible()
                 .findFirst();
 
         if (vengeanceWidget.isPresent()) {
-            Log.info("Clicking Vengeance widget at [218, " + childIndex + "]");
+            int[] path = vengeanceWidget.get().getIndexPath();
+            Log.info("Clicking Vengeance widget at path " + java.util.Arrays.toString(path));
             vengeanceWidget.get().click("Cast");
             Waiting.waitUntil(3000, () -> !MyPlayer.isAnimating());
         } else {
-            Log.warn("Vengeance widget not found at [218, " + childIndex + "]");
+            Log.warn("Vengeance widget not found (searched root 218 by name)");
         }
     }
 
@@ -2041,6 +2067,11 @@ public class Corp implements TribotScript {
 
         // Step 4: Open bank
         if (!Bank.isOpen()) {
+            // 1.9.14: settle delay before clicking the bank chest. Just
+            // arrived at Ferox (via Ring of Dueling); the chest object
+            // may take a tick or two to fully load after the tele. A click
+            // before render finishes can hit empty ground (walk-here).
+            Waiting.waitNormal(700, 200);
             // Try to find and left-click bank chest specifically
             Optional<GameObject> bankChestOpt = Query.gameObjects()
                     .nameContains("Bank chest")
@@ -3075,6 +3106,8 @@ public class Corp implements TribotScript {
 
             case WITHDRAW:
                 if (!Bank.isOpen()) {
+                    // 1.9.14: settle delay before clicking — see Step 4 above.
+                    Waiting.waitNormal(700, 200);
                     Optional<GameObject> chest = Query.gameObjects().nameContains("Bank chest").findFirst();
                     if (chest.isPresent()) {
                         if (chest.get().interact("Use") || chest.get().interact("Bank")) {
@@ -8098,11 +8131,12 @@ public class Corp implements TribotScript {
 	private boolean useOrnatePool() {
 		// 1.9.7.1: match by ACTION ("Drink").
 		// 1.9.8: retry up to 3 times; refuse to tele back un-restored.
-		// 1.9.13: use LEFT-click (click()) instead of right-click menu
-		// (interact("Drink")). The pool's default left-click action is
-		// "Drink" — left-click avoids any chance of selecting the wrong
-		// option from the right-click menu (e.g. walk-here) when the
-		// menu rendering races against the click.
+		// 1.9.13: use LEFT-click (click()) instead of right-click menu.
+		// 1.9.14: settle delay before the first click. We've just entered
+		// the house — the pool object may render a tick or two after the
+		// player tile updates, and clicking too early either hits empty
+		// ground (walk-here) or misses the object entirely.
+		Waiting.waitNormal(700, 200);
 		final int MAX_DRINK_ATTEMPTS = 3;
 		for (int attempt = 1; attempt <= MAX_DRINK_ATTEMPTS; attempt++) {
 			Optional<GameObject> poolOpt = Query.gameObjects()
