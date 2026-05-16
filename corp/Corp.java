@@ -3427,7 +3427,21 @@ public class Corp implements TribotScript {
         }
 
         if (dist > 1.5) {
-            Log.debug("Dark core close (dist=" + dist + ") - kill weapon ready");
+            // 1.9.69: while core is close but not adjacent (1.5 < dist <= 2.5),
+            // KEEP ATTACKING CORP with the maul. User log showed the bot
+            // froze for 70s straight at 'Dark core close (dist=2.0) -
+            // kill weapon ready' — auto-retaliate is OFF (1.9.64) and
+            // we weren't clicking anything, so the bot just stood there
+            // until food ran out. Now: click Corp explicitly so we
+            // DPS while waiting for the core to land adjacent. The
+            // next-tick check will switch to attacking the core when
+            // dist hits <= 1.5.
+            Optional<Npc> corpForWait = Query.npcs().nameEquals(CORPOREAL_BEAST).findFirst();
+            if (corpForWait.isPresent() && isCorpAlive(corpForWait.get())) {
+                corpForWait.get().interact("Attack");
+            }
+            Log.debug("Dark core close (dist=" + dist + ") - "
+                    + "DPS'ing Corp while waiting for core to land");
             return;
         }
 
