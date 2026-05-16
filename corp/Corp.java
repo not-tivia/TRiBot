@@ -3379,7 +3379,20 @@ public class Corp implements TribotScript {
         Log.info("Dark core adjacent (dist=" + dist + ") - attacking with kill weapon");
         if (core.interact("Attack")) {
             Waiting.waitNormal(350, 120);
-            stepAwayFromCore(core);
+            boolean stepped = stepAwayFromCore(core);
+            // 1.9.63: if step-away fails AND HP is low, we're going to
+            // die to the core landing. Bail to EMERGENCY_ESCAPE while
+            // we still have a Ring of Dueling charge. User log showed
+            // bot stuck for ~30s in a step-away-fails -> eat loop,
+            // burning all food, until emergency escape finally fired
+            // at HP <= 8 — by which point Ferox tele was racing the
+            // next core land. Better to tele out at HP 30 with food
+            // still in inventory than HP 8 with nothing left.
+            if (!stepped && MyPlayer.getCurrentHealth() <= INTERNAL_COMBO_EAT_HP) {
+                Log.warn("Step-away failed at low HP — bail to EMERGENCY_ESCAPE "
+                        + "before the core lands and finishes us");
+                currentState = BotState.EMERGENCY_ESCAPE;
+            }
         } else {
             Log.warn("Failed to interact with dark core - retrying next tick");
         }
@@ -3446,21 +3459,25 @@ public class Corp implements TribotScript {
                 { sx, 0 }, { 0, sy }, { -sx, 0 }, { 0, -sy }
         };
 
+        // 1.9.63: dropped the isTileWalkable pre-filter. Query.tiles()
+        // .isReachable() was filtering out EVERY candidate including
+        // tiles 1-2 squares from the player that are clearly walkable.
+        // User log: bot stuck looping 'no walkable target' -> emergency
+        // eat -> core lands -> eat -> ... until food ran out and died.
+        // Now just try LocalWalking.walkTo on each candidate directly.
+        // SDK returns false if not walkable; loop tries the next.
         for (int[] o : offsets) {
             if (o[0] == 0 && o[1] == 0) continue;
             WorldTile target = new WorldTile(myPos.getX() + o[0], myPos.getY() + o[1], myPos.getPlane());
             if (corpArea != null && corpArea.contains(target)) continue; // inside Corp = stomp damage
-            if (!isTileWalkable(target)) continue;
-
-            Log.info("STEP-AWAY: moving to " + target);
             try {
-                if (LocalWalking.walkTo(target)) return true;
-            } catch (Exception ignored) {}
-            try {
-                if (target.clickOnMinimap()) return true;
+                if (LocalWalking.walkTo(target)) {
+                    Log.info("STEP-AWAY: moving to " + target);
+                    return true;
+                }
             } catch (Exception ignored) {}
         }
-        Log.warn("STEP-AWAY: no walkable target away from core");
+        Log.warn("STEP-AWAY: every candidate walk failed (core may be cornering us)");
         return false;
     }
 
