@@ -9027,35 +9027,32 @@ public class Corp implements TribotScript {
 					+ "found anywhere under root 162)");
 			return false;
 		}
-		// 1.9.55: require the SHORTCUT widget to be ready (or input to be
-		// empty == fresh dialog ready for typing). Pre-1.9.55 we accepted
-		// 'shortcut OR input populated' — but the input renders 1-3 ticks
-		// BEFORE the shortcut, so we kept entering handleFriendNameDialog
-		// while the shortcut was still loading. The input-correct branch
-		// then saw no shortcut, fell back to Enter, Enter no-op'd, 5s
-		// timeout, retry. User: 'Do we have a timeout reversed here or
-		// something' — yes, the readiness gate was admitting too early.
+		// 1.9.56: wait specifically for the SHORTCUT widget. Pre-1.9.56's
+		// 'shortcut OR input-empty' escape failed when input was empty at
+		// the readiness check but got populated by the server BEFORE
+		// handleFriendNameDialog ran — then handleFriendNameDialog saw
+		// input populated, looked for shortcut, still not ready, fell
+		// back to a doomed Enter. Just always wait for the shortcut. For
+		// a previously-visited host (the usual case) it appears within
+		// 1-2 game ticks of the dialog opening. Bumped to 8s because the
+		// shortcut RENDERING is what we actually depend on; first-time
+		// hosts (no prior visit) will fall through and use Enter, but
+		// that's not the common case.
 		final String hostForReady = getEffectiveFriendName();
-		boolean readyForAction = Waiting.waitUntil(3000, () -> {
+		boolean shortcutReady = Waiting.waitUntil(8000, () -> {
 			try {
-				if (findFriendHouseShortcutByText(hostForReady).isPresent()) return true;
-				// No shortcut yet. If input is empty, dialog is fresh and
-				// we'll type — proceed without waiting on the shortcut.
-				// If input has text but shortcut is missing, KEEP WAITING
-				// — that's the bad state that produced double-types and
-				// failed-Enter retries.
-				return readFriendHouseInputText().isEmpty();
+				return findFriendHouseShortcutByText(hostForReady).isPresent();
 			} catch (Exception e) {
 				return false;
 			}
 		});
-		if (!readyForAction) {
-			Log.info("Dialog children not fully populated within 3s — "
-					+ "falling back to fixed 700ms settle");
-			Waiting.waitNormal(700, 200);
+		if (!shortcutReady) {
+			Log.info("Shortcut widget didn't render within 8s — "
+					+ "proceeding anyway (will type or press Enter)");
+			Waiting.waitNormal(400, 120);
 		} else {
-			Log.debug("Dialog children ready for interaction");
-			Waiting.waitNormal(200, 80);
+			Log.debug("Shortcut widget ready");
+			Waiting.waitNormal(120, 50);
 		}
 		return handleFriendNameDialog();
 	}
