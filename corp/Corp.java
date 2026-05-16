@@ -21,6 +21,29 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.8 (2026-05-16) - Three follow-up fixes after the 1.9.7.1 success:
+ *                        (a) Defer phase-rotation equip. Rotating Elder maul
+ *                            → Arclight always happens at energy 0 (just spent
+ *                            the last spec of the bar), so equipping Arclight
+ *                            this tick is wasted — we can't fire on it
+ *                            anyway. Pre-1.9.8 the equip ran in the boss room
+ *                            (2 seconds of swap animation while Corp keeps
+ *                            hitting). Now we update chosenSpecWeapon but
+ *                            defer the equip until the next bar (handleSpecialAttack
+ *                            already equips the chosen weapon if it isn't
+ *                            on). Saves the in-room exposure.
+ *                        (b) Pool restoration actually verifies. Pre-1.9.8
+ *                            useOrnatePool said "Pool restoration timed out,
+ *                            but continuing" — bot teleported back with 0%
+ *                            spec and low HP and died on Corp. Now retries
+ *                            up to 3 drinks, then refuses to tele if stats
+ *                            didn't actually restore.
+ *                        (c) Two more coordinator-gated refreshSpecWeaponForPhase
+ *                            calls (handleSpecialAttack + handleUsingInitialSpecs).
+ *                            Both gates dropped — phase rotation works for
+ *                            solo via buildSoloAggregate. handleUsingInitialSpecs
+ *                            also no longer calls equipMainWeaponFast before
+ *                            tele (mirrors the 1.9.7 fix elsewhere).
  *   1.9.7.1 (2026-05-16) - Hotfix follow-up to 1.9.7:
  *                          (a) Pool/jewellery-box matching is now action-based,
  *                              not name-based. The actual object names are
@@ -2548,11 +2571,15 @@ public class Corp implements TribotScript {
             lastSeenSpecEnergy = currentSpecPercent; // commit new floor
 
             // 1.9.5: phase rotation. If this spec pushed us past a phase
-            // target, swap to the next-phase weapon (Elder maul → Arclight
-            // → BGS) so the next attack uses the right tool for the team's
-            // current need. Pre-1.9.5 rotation only happened in the pre-
-            // engagement spec loops; mid-fight bars stayed on Phase 1
-            // forever even after 4 Elder maul specs landed.
+            // target, update chosenSpecWeapon to the next-phase weapon
+            // (Elder maul → Arclight → BGS).
+            // 1.9.8: do NOT equip the new weapon here. The rotation always
+            // happens at energy 0 (we just spent the last spec of the bar),
+            // so we can't fire on the new weapon this bar anyway. Equipping
+            // Arclight while still in the boss room wastes 2 seconds of
+            // swap animation during which Corp keeps hitting. The actual
+            // equip happens at the next bar via handleSpecialAttack which
+            // already equips chosenSpecWeapon if not on.
             String previousSpecWeapon = chosenSpecWeapon;
             refreshSpecWeaponForPhase();
             boolean phaseRotated = chosenSpecWeapon != null
@@ -2560,10 +2587,8 @@ public class Corp implements TribotScript {
                     && !chosenSpecWeapon.equals(previousSpecWeapon);
             if (phaseRotated) {
                 Log.info("Phase target met for " + previousSpecWeapon
-                        + " — rotating to " + chosenSpecWeapon);
-                if (Inventory.contains(chosenSpecWeapon)) {
-                    equipSpecWeapon();
-                }
+                        + " — chosenSpecWeapon now " + chosenSpecWeapon
+                        + " (equip deferred to next bar)");
             }
 
             if (canFireAnotherSpecOnThisBar()) {
@@ -5533,7 +5558,11 @@ public class Corp implements TribotScript {
 		}
 
 		// Phase D: rotate to the right spec weapon for the team's current phase.
-		if (settings.coordinatorEnabled && !refreshSpecWeaponForPhase()) {
+		// 1.9.8: dropped the settings.coordinatorEnabled gate (mirrors the
+		// 1.9.5 fix elsewhere). Phase rotation should work for solo bots too
+		// — buildSoloAggregate provides the same phase counters as the
+		// coordinator path.
+		if (!refreshSpecWeaponForPhase()) {
 			Log.info("No usable spec weapon for current team phase — falling through to DPS.");
 			if (specWeaponReadyForUse) { queueSpecWeaponSwitchBack(); specWeaponReadyForUse = false; }
 			currentState = BotState.FIGHTING_CORP;
@@ -7254,9 +7283,9 @@ public class Corp implements TribotScript {
 		}
 
 		// Phase D: rotate to the right spec weapon for current team phase.
-		if (settings.coordinatorEnabled && !refreshSpecWeaponForPhase()) {
+		// 1.9.8: dropped coordinator gate so phase rotation works for solo.
+		if (!refreshSpecWeaponForPhase()) {
 			Log.info("No usable spec weapon for current team phase — skipping initial spec cycle.");
-			equipMainWeaponFast();
 			currentState = BotState.TELEPORTING_TO_HOUSE;
 			return;
 		}
@@ -7817,46 +7846,55 @@ public class Corp implements TribotScript {
 	 * Simple ornate pool usage
 	 */
 	private boolean useOrnatePool() {
-		// 1.9.7.1: match by ACTION instead of name. The actual pool is
-		// called "Ornate pool of Rejuvenation" — different word order than
-		// the previous "rejuvenation pool" nameContains. Pools regardless
-		// of tier all expose the "Drink" action, so picking by action is
-		// both robust to tier variation AND robust to name word-order.
-		Optional<GameObject> poolOpt = Query.gameObjects()
-				.filter(o -> o.getActions().contains("Drink"))
-				.findFirst();
+		// 1.9.7.1: match by ACTION instead of name. Pools across tiers all
+		// expose the "Drink" action.
+		// 1.9.8: actually retry if stats don't restore — pre-1.9.8 the
+		// "Pool restoration timed out, but continuing" path teleported the
+		// bot back to Corp with 0% spec and low HP, where it instantly
+		// died. Now we retry up to 3 drink attempts, then bail out
+		// honestly via EMERGENCY_ESCAPE rather than teleing back un-restored.
+		final int MAX_DRINK_ATTEMPTS = 3;
+		for (int attempt = 1; attempt <= MAX_DRINK_ATTEMPTS; attempt++) {
+			Optional<GameObject> poolOpt = Query.gameObjects()
+					.filter(o -> o.getActions().contains("Drink"))
+					.findFirst();
+			if (!poolOpt.isPresent()) {
+				Log.error("No drinkable pool found in render (attempt " + attempt + ")");
+				return false;
+			}
+			Log.info("Using " + poolOpt.get().getName()
+					+ " for restoration (attempt " + attempt + "/" + MAX_DRINK_ATTEMPTS + ")...");
 
-		if (!poolOpt.isPresent()) {
-			Log.error("No drinkable pool found in render");
-			return false;
-		}
-		Log.info("Using " + poolOpt.get().getName() + " for restoration...");
+			if (!poolOpt.get().interact("Drink")) {
+				Log.warn("Pool 'Drink' interact failed (attempt " + attempt + ")");
+				Waiting.waitNormal(800, 200);
+				continue;
+			}
 
-		GameObject pool = poolOpt.get();
-		if (pool.interact("Drink")) {
-			Log.info("Used ornate pool, waiting for restoration...");
-
-			// Wait for restoration
+			// Wait for restoration — full bar, full HP, full prayer.
 			boolean restored = Waiting.waitUntil(10000, () -> {
-				boolean specRestored = Combat.getSpecialAttackPercent() >= 100;
-				boolean healthRestored = MyPlayer.getCurrentHealth() >= Skill.HITPOINTS.getActualLevel();
-				boolean prayerRestored = Prayer.getPrayerPoints() >= Skill.PRAYER.getActualLevel();
-				return specRestored && healthRestored && prayerRestored;
+				boolean specOk = Combat.getSpecialAttackPercent() >= 100;
+				boolean hpOk = MyPlayer.getCurrentHealth() >= Skill.HITPOINTS.getActualLevel();
+				boolean prayerOk = Prayer.getPrayerPoints() >= Skill.PRAYER.getActualLevel();
+				return specOk && hpOk && prayerOk;
 			});
 
 			if (restored) {
-				Log.info("Successfully restored at ornate pool");
-				// Wait additional 0.6 seconds before proceeding to jewelry box
-				Waiting.waitUniform(600, 600);
-				return true;
-			} else {
-				Log.warn("Pool restoration timed out, but continuing");
-				Waiting.waitUniform(600, 600); // Still wait the 0.6 seconds
+				Log.info("Successfully restored at " + poolOpt.get().getName()
+						+ " (spec=" + Combat.getSpecialAttackPercent()
+						+ "%, hp=" + MyPlayer.getCurrentHealth()
+						+ ", prayer=" + Prayer.getPrayerPoints() + ")");
+				Waiting.waitUniform(600, 600); // settle before jewellery box
 				return true;
 			}
+			Log.warn("Restoration didn't complete on attempt " + attempt
+					+ " (spec=" + Combat.getSpecialAttackPercent()
+					+ "%, hp=" + MyPlayer.getCurrentHealth()
+					+ ", prayer=" + Prayer.getPrayerPoints() + ") — will retry");
+			Waiting.waitNormal(800, 200);
 		}
-
-		Log.error("Failed to interact with ornate pool");
+		Log.error("Pool restoration failed after " + MAX_DRINK_ATTEMPTS
+				+ " attempts — refusing to tele back un-restored");
 		return false;
 	}
 
