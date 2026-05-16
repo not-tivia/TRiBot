@@ -5674,6 +5674,29 @@ public class Corp implements TribotScript {
         }
     }
 
+    /** 1.9.49: true if the player is already standing in melee range of
+     *  Corp — outside the 5x5 hitbox but close enough that no further
+     *  movement is needed to attack. Returns false if the player is
+     *  inside the hitbox (must step off via anti-stomp) or too far (need
+     *  to walk closer). Skipping the move when this is true prevents the
+     *  bot from flanking through Corp's hitbox to reach a 'canonical'
+     *  N/S/E/W tile when the current frontal position is equally good. */
+    private boolean isPlayerAlreadyInCorpMeleeRange(WorldTile playerPos, Npc corp) {
+        if (playerPos == null || corp == null) return false;
+        Area corpArea = corp.getArea();
+        if (corpArea == null) return false;
+        if (corpArea.contains(playerPos)) return false; // inside hitbox — anti-stomp handles
+        WorldTile center = corpArea.getCenter();
+        int dx = Math.abs(playerPos.getX() - center.getX());
+        int dy = Math.abs(playerPos.getY() - center.getY());
+        int maxOffset = Math.max(dx, dy);
+        // Hitbox spans offsets -2..+2 from center (5x5). Adjacent tiles
+        // sit at maxOffset == 3. Allow up to 5 so the player doesn't
+        // have to be *exactly* 1 tile out — anywhere in the melee
+        // "halo" around Corp is fine to attack from.
+        return maxOffset >= 3 && maxOffset <= 5;
+    }
+
     /**
      * Get dynamic positions around Corp's current location
      * This handles Corp roaming by calculating positions relative to where Corp actually is
@@ -5746,6 +5769,23 @@ public class Corp implements TribotScript {
 		}
 
 		WorldTile myPos = MyPlayer.getTile();
+
+		// 1.9.49: if we're already standing outside Corp's hitbox but
+		// close enough to attack (within 5 tiles of center, outside
+		// the 5x5 hitbox = 1-3 tiles from the edge), just stay put.
+		// User: 'We still run under the corp instead of just accepting
+		// a frontal position.' The cardinal-position walk was forcing
+		// the bot to flank to a canonical (N/S/E/W of center) tile
+		// even when a perfectly attackable tile was already under our
+		// feet. The frontal stand-still is far safer — no risk of
+		// pathing through Corp's hitbox, no stomp damage, melee range
+		// is identical anywhere around the edge.
+		if (myPos != null && isPlayerAlreadyInCorpMeleeRange(myPos, corp)) {
+			Log.info("Already in Corp melee range at " + myPos
+					+ " — staying put (no need to flank)");
+			return true;
+		}
+
 		List<WorldTile> dynamicPositions = getDynamicCorpPositions(corp);
 
 		// 🔥 FILTER POSITIONS USING THE SAFETY CHECK
