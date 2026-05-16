@@ -6127,25 +6127,24 @@ public class Corp implements TribotScript {
     }
 
     private void walkToFeroxBank() {
-        // 1.9.15: switched to GlobalWalking.walkToBank(). Pre-1.9.15 we
-        // LocalWalking-walked to a fixed tile (3150, 3625, 0) — works ONLY
-        // when the bank is already in render. Ring-of-Dueling teleport
-        // lands the player on a tile where the bank chest hasn't loaded
-        // yet, LocalWalking fails, and the bot was stuck "looking for
-        // restoration pool" with no path. GlobalWalking.walkToBank()
-        // auto-pathfinds to the nearest bank from any tile.
+        // 1.9.15.1: GlobalWalking.walkToBank() has no location parameter
+        // and picks the SDK-determined nearest bank — that could be
+        // Castle Wars or wherever the pathfinder picks. We specifically
+        // want the FEROX bank since we just Ring-of-Dueling'd in. Use
+        // GlobalWalking.walkTo with the Ferox bank chest tile directly.
         if (Query.gameObjects().nameContains("Bank chest").findFirst().isPresent()) {
             Log.info("Bank chest already visible — no walk needed");
             return;
         }
-        Log.info("Walking to nearest bank via GlobalWalking...");
+        Log.info("Walking to Ferox bank chest via GlobalWalking...");
+        WorldTile feroxBankTile = new WorldTile(3128, 3631, 0);
         try {
-            org.tribot.script.sdk.walking.GlobalWalking.walkToBank();
+            org.tribot.script.sdk.walking.GlobalWalking.walkTo(feroxBankTile);
             Waiting.waitUntil(15000, () -> isNearFeroxBank());
         } catch (Throwable e) {
-            Log.warn("GlobalWalking.walkToBank failed: " + e.getMessage()
+            Log.warn("GlobalWalking.walkTo(Ferox bank) failed: " + e.getMessage()
                     + " — falling back to local walk");
-            LocalWalking.walkTo(new WorldTile(3150, 3625, 0));
+            LocalWalking.walkTo(feroxBankTile);
         }
     }
 
