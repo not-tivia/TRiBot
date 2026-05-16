@@ -2,6 +2,7 @@ package scripts.corp;
 
 import org.tribot.script.sdk.*;
 import org.tribot.script.sdk.input.Keyboard;
+import org.tribot.script.sdk.input.Mouse;
 import org.tribot.script.sdk.query.*;
 import org.tribot.script.sdk.script.TribotScriptManifest;
 import org.tribot.script.sdk.types.*;
@@ -21,6 +22,25 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.11 (2026-05-16) - Two fixes after diagnosing the 1.9.10 typing bug:
+ *                         (a) Friend-name typing dropped the first 4
+ *                             characters. The chatbox dialog opens visually
+ *                             but the input field isn't always focused for
+ *                             keyboard input in the same tick. Production
+ *                             evidence: bot typed "TimeToAFK" but the
+ *                             remembered last-typed buffer was "ToAfK"
+ *                             (first 4 chars eaten by focus transition).
+ *                             Added a 400-700ms settle wait between
+ *                             dialog-open and typing.
+ *                         (b) Combo-eat picks the karambwan slot CLOSEST
+ *                             to the current mouse position. After the
+ *                             shark click the cursor sits on the shark
+ *                             slot; the nearest karambwan minimizes
+ *                             mouse-travel time so both eats land in the
+ *                             same game tick. Pre-1.9.11 took the first
+ *                             karambwan returned by Query.inventory which
+ *                             is typically the top-left slot — often far
+ *                             from the shark we just clicked.
  *   1.9.10 (2026-05-16) - Two fixes after the 1.9.9 test:
  *                         (a) Restoration failure fallback. When house entry
  *                             fails MAX_HOUSE_ENTRY_ATTEMPTS times (e.g. the
@@ -6820,8 +6840,14 @@ public class Corp implements TribotScript {
             Waiting.waitUniform(40, 80);
         }
 
-        // Step 2: Eat karambwan immediately after
-        Optional<InventoryItem> karambwanOpt = Query.inventory().nameEquals("Cooked karambwan").findFirst();
+        // Step 2: Eat karambwan immediately after.
+        // 1.9.11: pick the karambwan slot CLOSEST to the current mouse pos.
+        // After the shark click the mouse is sitting on the shark slot; the
+        // nearest karambwan minimizes mouse-travel time, helping both eats
+        // land in the same game tick. Pre-1.9.11 we just took the first
+        // karambwan returned by Query.inventory(), which is typically the
+        // top-left slot — could be far from the shark we just clicked.
+        Optional<InventoryItem> karambwanOpt = pickClosestKarambwanToMouse();
         if (karambwanOpt.isPresent() && karambwanOpt.get().click("Eat")) {
             ateKarambwan = true;
             Log.info("Emergency: Ate Karambwan");
@@ -7119,6 +7145,43 @@ public class Corp implements TribotScript {
      *  after every bank trip and on script start. */
     private void invalidateOwnedSpecWeaponsCache() {
         ownedSpecWeaponsCache = null;
+    }
+
+    /** 1.9.11: pick the Cooked karambwan whose inventory slot is closest to
+     *  the current mouse position. After clicking shark the cursor is on the
+     *  shark slot — the nearest karambwan minimizes mouse travel, keeping
+     *  both eats in the same tick. Falls back to Query.inventory().findFirst()
+     *  if the SDK's getRectangle / Mouse.getPosition aren't available at
+     *  runtime (defensive — the SDK has been stable but reflection guards
+     *  cheaply protect against silent NPEs). */
+    private Optional<InventoryItem> pickClosestKarambwanToMouse() {
+        try {
+            java.awt.Point mousePos = Mouse.getPosition();
+            if (mousePos == null) {
+                return Query.inventory().nameEquals("Cooked karambwan").findFirst();
+            }
+            List<InventoryItem> candidates = Query.inventory()
+                    .nameEquals("Cooked karambwan").toList();
+            InventoryItem best = null;
+            double bestDist = Double.MAX_VALUE;
+            for (InventoryItem item : candidates) {
+                try {
+                    java.awt.Rectangle r = item.getStackRectangle();
+                    if (r == null) continue;
+                    double dx = (r.getX() + r.getWidth() / 2.0) - mousePos.getX();
+                    double dy = (r.getY() + r.getHeight() / 2.0) - mousePos.getY();
+                    double d = Math.sqrt(dx * dx + dy * dy);
+                    if (d < bestDist) {
+                        bestDist = d;
+                        best = item;
+                    }
+                } catch (Throwable ignored) { /* fall through */ }
+            }
+            if (best != null) return Optional.of(best);
+        } catch (Throwable ignored) {
+            // SDK shape changed or runtime issue — fall back to naive pick.
+        }
+        return Query.inventory().nameEquals("Cooked karambwan").findFirst();
     }
 
     /** 1.9.9: sum of melee combat XP (Attack + Strength + Defence + Hitpoints).
@@ -7910,11 +7973,15 @@ public class Corp implements TribotScript {
 		Log.info("No widget shortcut found, typing host name: " + hostName);
 
 		try {
-			// 1.9.7: pre-1.9.7 used Waiting.waitUntil(2000, () -> true) which
-			// returns instantly (predicate is already true). The bot typed
-			// and pressed Enter in the same tick, before the game-side typing
-			// buffer registered the text → submit-empty → entry fails.
-			// Use a real human-paced delay between typing and Enter.
+			// 1.9.7 / 1.9.11: pre-typing settle delay. The chatbox "Enter
+			// name" dialog opens visually but the input field isn't always
+			// focused for keyboard input in the same tick. Pre-1.9.11 the
+			// first 3-4 characters of "TimeToAFK" got eaten by the focus
+			// transition, leaving the buffer at "ToAfK" and the entry
+			// failing because no friend by that name exists. A 400-700ms
+			// settle wait gives the dialog time to grab focus before we
+			// start typing.
+			Waiting.waitNormal(550, 150);
 			Keyboard.typeString(hostName);
 			Waiting.waitNormal(900, 200);
 
