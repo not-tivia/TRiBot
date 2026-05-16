@@ -9017,24 +9017,16 @@ public class Corp implements TribotScript {
 			if (inputStripped.equals(hostStripped)) {
 				Log.info("Friend-house input already correct (\"" + existingInput
 						+ "\") — submitting");
-				// 1.9.50: input populated doesn't always mean the shortcut
-				// widget is renderable yet. Attempt 1 in user log showed
-				// "No shortcut widget — pressing Enter" then 5s timeout;
-				// attempt 2 found the shortcut and entered immediately.
-				// Conclusion: input renders BEFORE the shortcut, our
-				// "dialog children ready" predicate fires too early when
-				// only the input is up. Now: poll for the shortcut for up
-				// to 3s. If it appears, click it. If not, fall back to
-				// Enter as before.
-				final String hn = hostName;
-				Waiting.waitUntil(3000, () ->
-						findFriendHouseShortcutByText(hn).isPresent());
+				// 1.9.51: per user — if the name is there, submit now,
+				// no hesitation. Use whichever submit path is available
+				// THIS instant: shortcut widget if visible, otherwise
+				// Enter. The outer retry handles the rare case both fail.
 				Optional<Widget> shortcutByText = findFriendHouseShortcutByText(hostName);
 				if (shortcutByText.isPresent()) {
 					Log.info("Clicking 'Last name:' shortcut to submit");
 					shortcutByText.get().click();
 				} else {
-					Log.info("Shortcut widget never rendered — pressing Enter");
+					Log.info("No shortcut widget — pressing Enter");
 					try { Keyboard.pressEnter(); } catch (Exception ignored) {}
 				}
 				return Waiting.waitUntil(5000, () -> isInFriendHouse());
