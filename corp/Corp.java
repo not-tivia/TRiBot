@@ -8186,21 +8186,22 @@ public class Corp implements TribotScript {
 		// least one action OR an explicit visible/clickable state, so
 		// the label widget gets filtered out.
 		final String hostLower = hostName == null ? "" : hostName.toLowerCase();
-		// 1.9.17: try the user-supplied exact path [162, 39] first. User
-		// said: "it should be 162.39 162.39[0] Chatbox.MES_LAYER 'Last
-		// name: timetoafk'". The parent widget [162, 39] is the clickable
-		// shortcut; [162, 39, 0] is just the text child inside it.
+		// 1.9.19: target the widget at exact path [162, 39] per user.
+		// The widget's own text is "<col=000000>Last name:</col> TimeToAFK"
+		// (with HTML color tags). Strip tags, lowercase, check contains
+		// host name. If parent doesn't directly contain the name, walk
+		// children (the text might live in [162, 39, 0]). Drop the
+		// isVisible / hasAction filters from previous versions —
+		// they were over-filtering this widget.
 		Optional<Widget> friendWidgetOpt = Query.widgets()
 				.inRoots(162)
-				.isVisible()
 				.filter(w -> w.getIndexPath().length == 2
 						&& w.getIndexPath()[1] == 39)
 				.filter(w -> {
-					// Verify the host text is in this widget or any child.
 					String raw = w.getText().orElse("");
 					String clean = raw.replaceAll("<[^>]*>", "").toLowerCase();
 					if (clean.contains(hostLower)) return true;
-					// Check children for the text label.
+					// Fallback: check children for the host text.
 					try {
 						List<Widget> children = w.getChildren();
 						if (children != null) {
@@ -8214,6 +8215,15 @@ public class Corp implements TribotScript {
 					return false;
 				})
 				.findFirst();
+		if (friendWidgetOpt.isPresent()) {
+			int[] path = friendWidgetOpt.get().getIndexPath();
+			String txt = friendWidgetOpt.get().getText().orElse("")
+					.replaceAll("<[^>]*>", "").trim();
+			Log.info("Matched friend shortcut widget path "
+					+ java.util.Arrays.toString(path) + " text=\"" + txt + "\"");
+		} else {
+			Log.info("No widget at [162, 39] matching host name " + hostName);
+		}
 
 		if (friendWidgetOpt.isPresent()) {
 			Log.info("Found friend widget shortcut for " + hostName + ", clicking it...");
