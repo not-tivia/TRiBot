@@ -8803,9 +8803,9 @@ public class Corp implements TribotScript {
         c.put("Elder maul", 50);
         c.put("Dragon warhammer", 50);
         c.put("Bandos godsword", 50);
-        c.put("Arclight", 25);
-        c.put("Darklight", 25);
-        c.put("Emberlight", 25);
+        c.put("Arclight", 50);     // 1.9.26: fixed from 25 — Arclight is 50%
+        c.put("Darklight", 50);    // 1.9.26: fixed from 25 — Darklight is 50%
+        c.put("Emberlight", 25);   // Emberlight (upgraded Arclight) is 25%
         c.put("Crystal halberd", 60);
         c.put("Dragon halberd", 30);
         SPEC_COST = Collections.unmodifiableMap(c);
