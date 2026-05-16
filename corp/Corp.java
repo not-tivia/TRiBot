@@ -2299,20 +2299,27 @@ public class Corp implements TribotScript {
             }
         }
 
-        // Step 2: Use pool to restore health/prayer/spec if needed
+        // 1.9.58: walk to the central Ferox tile (3135, 3630) FIRST,
+        // then interact with pool/bank. User: 'i noticed i was trying
+        // to click on the pool in ferox before moving to the tile that
+        // we want to be in so we are clicking on things that are loaded
+        // in the game chunk but too far to be rendered in.' The Query
+        // can find game objects by tile coordinate even when they
+        // aren't on-screen, but interact() needs the object's bounding
+        // rect to be visible. Walking first guarantees both pool and
+        // bank chest are in render distance.
+        if (!isNearFeroxBank()) {
+            walkToFeroxBank();
+            return;
+        }
+
+        // Step 2: Use pool to restore health/prayer if needed
         if (needsPoolRestoration()) {
             if (useRestorePool()) {
                 Log.info("Successfully used restoration pool");
             } else {
                 Log.warn("Failed to use pool, continuing to banking");
             }
-        }
-
-        // Step 3: Bank for supplies
-        if (!isNearFeroxBank()) {
-            // Walk to bank area in Ferox Enclave
-            walkToFeroxBank();
-            return;
         }
 
         // Step 4: Open bank
@@ -3112,6 +3119,25 @@ public class Corp implements TribotScript {
 			queueSpecWeaponSwitchBack();
 		}
 
+		// 1.9.58: in kill phase with Fang equipped, fire Fang's 25% spec.
+		// User: 'while we are killing corp with the fang after actually
+		// getting all debuff specs off we should be able to use our 25%
+		// fang specs on the corp.' Fang spec hits harder + applies a
+		// bleed for extra DPS. Energy gate is 25 (Fang cost), not the
+		// generic getMinSpecEnergy() (50 for Arclight/Maul).
+		if (teamPhaseNeeded() == 0
+				&& Equipment.contains("Osmumten's fang")
+				&& Combat.getSpecialAttackPercent() >= 25
+				&& !Combat.isSpecialAttackEnabled()
+				&& isPlayerInCombat()) {
+			Optional<Npc> corpForFang = Query.npcs().nameEquals(CORPOREAL_BEAST).findFirst();
+			if (corpForFang.isPresent() && isCorpAlive(corpForFang.get())) {
+				Log.info("Kill phase: activating Fang spec (energy "
+						+ Combat.getSpecialAttackPercent() + "%)");
+				tryActivateSpec();
+			}
+		}
+
 		// 1.8.8: mid-fight POH restoration. If we're out of spec but the team
 		// hasn't hit its phase targets yet and Corp is still healthy enough
 		// to be worth dumping more stat-reducer specs into, break out of
@@ -3230,15 +3256,26 @@ public class Corp implements TribotScript {
      *  jumped to attacks it, then steps away so the core dies mid-air and
      *  doesn't respawn. Non-targeted bots hold the kill weapon ready. */
     private void handleAdvancedDarkCoreModern() {
-        // PRIORITY 1: keep ourselves alive — same eat/drink guards as legacy.
+        // 1.9.58: only eat when HEALTH IS CRITICAL during core. Pre-1.9.58
+        // we eat-combo'd at HP <= INTERNAL_EMERGENCY_HP (50) AND at HP <=
+        // eatHealthThreshold + 20 (~41). With Corp magic hits coming in
+        // every few ticks the bot ping-ponged: eat -> attack queued ->
+        // eat overrides attack click -> next tick eat again -> attack
+        // never lands. User: 'We were also having issues with the core
+        // between trying to eat and then attack and then eat and then
+        // attack and the attack was never actually going off until we
+        // lost a lot of health.' Now: skip the proactive eat when HP is
+        // merely below eat-threshold; only emergency-eat when HP <=
+        // INTERNAL_EMERGENCY_HP (true panic). The jump-kill on the core
+        // is what saves us; eating instead of attacking lets the core
+        // land and do more damage than the food restores.
         int currentHealth = MyPlayer.getCurrentHealth();
         if (currentHealth <= INTERNAL_EMERGENCY_HP) {
             Log.warn("CRITICAL HEALTH during dark core - emergency combo eating!");
             emergencyComboEatDuringMovement();
-        } else if (currentHealth <= eatHealthThreshold() + 20) {
-            emergencyComboEatDuringMovement();
         }
-        if (Prayer.getPrayerPoints() <= INTERNAL_DRINK_PRAYER_THRESHOLD + 10) {
+        // Prayer only if actually low — same as before but no buffer.
+        if (Prayer.getPrayerPoints() <= INTERNAL_DRINK_PRAYER_THRESHOLD) {
             drinkPrayerPotionDuringMovement();
         }
 
@@ -7097,6 +7134,21 @@ public class Corp implements TribotScript {
 		//       it; spec dumping is pointless past this point — go melee).
 		boolean specDepleted = Combat.getSpecialAttackPercent() < getMinSpecEnergy();
 		boolean phaseTargetsNotMet = teamPhaseNeeded() > 0;
+		// 1.9.58: also require a usable spec weapon for the current phase.
+		// Pre-1.9.58 the bot would tele to POH for phase 3 (BGS damage)
+		// even with no BGS owned — back at Corp, refreshSpecWeaponForPhase
+		// returned null, no spec fired, energy drained again somehow, and
+		// the bot teled AGAIN. User: 'i clicked the special attack on the
+		// fang manually and it went back to arlight tele debuff looping
+		// for the rest of the kill.' The manual Fang spec dropped energy
+		// to 25%, specDepleted+phaseTargetsNotMet flipped true, and the
+		// tele cycle kicked in with no Phase-3 weapon to actually use.
+		boolean haveWeaponForCurrentPhase = pickSpecWeaponForCurrentPhase() != null;
+		if (!haveWeaponForCurrentPhase) {
+			Log.debug("shouldStartRestorationCycle: NO — no spec weapon "
+					+ "owned for current team phase (we'd tele for nothing)");
+			return false;
+		}
 		// 1.9.6: dropped corpHealthAboveFloor from this gate. The Corp-HP
 		// gate is a SPEC-FIRE decision (don't waste a spec on a near-dead
 		// Corp) — corpMinHpForSpec / isCorpHealthAboveSpecThreshold still
