@@ -21,6 +21,19 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.12 (2026-05-16) - After tele back from POH, ALWAYS go to
+ *                         WAITING_FOR_TEAM. Pre-1.9.12 handleTeleportingBackToCorp
+ *                         would loop straight back into PREPARING_RESTORATION_CYCLE
+ *                         if more cycles were available — but we just
+ *                         refilled spec and should USE it on Corp first.
+ *                         Production log: bot landed in Corp's lobby with
+ *                         spec=100%, immediately ran "Using initial special
+ *                         attacks (0/4)" — Corp isn't visible from the
+ *                         lobby tile, state errored with "Corp not found",
+ *                         fell through to emergency Ferox tele. The
+ *                         mid-fight restoration trigger fires the NEXT
+ *                         POH cycle naturally once the spec bar drains
+ *                         again, so always-WAITING_FOR_TEAM is correct.
  *   1.9.11.1 (2026-05-16) - Fix 1.9.11 compile error: Mouse.getPosition() and
  *                           InventoryItem.getStackRectangle() aren't exposed
  *                           in the public TRiBot SDK. Replaced "closest to
@@ -7819,16 +7832,22 @@ public class Corp implements TribotScript {
 			Log.info("Successfully teleported back to Corp");
 
 			currentRestorationCycle++;
-			Log.info("Completed restoration cycle " + currentRestorationCycle + "/" + settings.totalRestorationCycles);
+			Log.info("Completed restoration cycle " + currentRestorationCycle
+					+ "/" + settings.totalRestorationCycles);
+			isInRestorationPhase = false;
 
-			if (currentRestorationCycle >= settings.totalRestorationCycles) {
-				Log.info("All restoration cycles completed, proceeding to normal combat");
-				isInRestorationPhase = false;
-				currentState = BotState.WAITING_FOR_TEAM;
-			} else {
-				Log.info("Starting next restoration cycle");
-				currentState = BotState.PREPARING_RESTORATION_CYCLE;
-			}
+			// 1.9.12: ALWAYS go to WAITING_FOR_TEAM after tele back, never
+			// straight into another PREPARING_RESTORATION_CYCLE. We just
+			// refilled spec — we should USE it on Corp before considering
+			// another POH cycle. Pre-1.9.12 the bot would land in Corp's
+			// lobby with full spec and immediately try to do "Using initial
+			// special attacks (0/4)" — but Corp isn't in render from the
+			// lobby tile, so the state would error out with "Corp not found
+			// during initial spec phase" and fall through to emergency
+			// Ferox tele. The mid-fight restoration trigger in
+			// handleFightingCorp will fire ANOTHER POH cycle naturally when
+			// the spec bar drains again.
+			currentState = BotState.WAITING_FOR_TEAM;
 		} else {
 			Log.error("Failed to teleport back to Corp - ending restoration");
 			emergencyResetPOHSystem();
