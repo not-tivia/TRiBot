@@ -21,6 +21,41 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.4 (2026-05-16) - Strategy + survival fixes after a death log.
+ *                        Insight: during spec-dump phase the spec weapon
+ *                        IS the main weapon. Fang only comes out at the
+ *                        kill-phase transition. Pre-1.9.4 the bot swapped
+ *                        to Fang after every spec bar — extra weapon-swap
+ *                        animation lock during which Corp kept hitting.
+ *                        (a) In-line spec detector: on bar exhaust, route
+ *                            INSTA to PREPARING_RESTORATION_CYCLE when
+ *                            shouldStartRestorationCycle says we still
+ *                            want more specs. Fang swap only fires when
+ *                            restoration is no longer wanted (kill phase).
+ *                            The spec weapon stays equipped through the
+ *                            POH cycle and into the next bar.
+ *                        (b) Removed isOnLunarSpellbook() probe gate from
+ *                            handleVengeanceLogic. The probe returned false
+ *                            positives on the user's client even after 1.9.3
+ *                            text-filter relaxation, locking out vengeance
+ *                            for the whole session. castVengeance now just
+ *                            attempts the cast; widget-not-found logs
+ *                            sufficient diagnosis if not on Lunars.
+ *                        (c) New INTERNAL_PANIC_TELE_HP = 8. At HP <= 8
+ *                            (one Corp hit from death) we skip eating and
+ *                            bail straight to EMERGENCY_ESCAPE — Ferox
+ *                            tele / Games necklace / run / logout.
+ *                        (d) Emergency HP check: if emergencyComboEat
+ *                            returns false (no food available), tele out
+ *                            via EMERGENCY_ESCAPE instead of standing and
+ *                            dying. Also dropped the spec-cancel mouse
+ *                            click during the emergency tick — wasted
+ *                            motion when we should be eating/teling.
+ *                        (e) HP guard on handleSpecWeaponSwitchTiming:
+ *                            postpone the Fang-swap animation if HP <=
+ *                            INTERNAL_COMBO_EAT_HP. Production log
+ *                            showed the bot dying mid-swap because
+ *                            equipMainWeaponFast blocks the thread.
  *   1.9.3 (2026-05-16) - Fix vengeance not casting. The isVengeanceSelfWidget
  *                        filter (added in 1.7.4 to guard against Vengeance
  *                        Other) required widget text to contain "vengeance"
@@ -667,6 +702,10 @@ public class Corp implements TribotScript {
     public static final int INTERNAL_PHASE3_BGS_DAMAGE = 200; // BGS damage drained
     public static final int INTERNAL_EAT_BELOW_MAX_HP = 21;
     public static final int INTERNAL_EMERGENCY_HP = 15;
+    // 1.9.4: one Corp hit away from death. Below this we skip eating/swapping
+    // and bail straight to EMERGENCY_ESCAPE (Ferox tele / Games necklace /
+    // run-to-entrance / logout) — eating clearly isn't keeping up.
+    public static final int INTERNAL_PANIC_TELE_HP = 8;
     // 1.8.9: combo-eat (Shark + Karambwan) trigger. Corp hits hard enough that
     // normal-eating at maxHp-21 (~78) can't keep up — by the time the next
     // tick fires the bot is already taking another swing. Combo eat below 50
@@ -2322,26 +2361,33 @@ public class Corp implements TribotScript {
     }
 
     private void handleFightingCorp() {
-        // 1.8.9: emergency HP eat-only short-circuit. Pre-1.8.9 the bot would
-        // happily pre-activate spec, swap weapons, and otherwise act normally
-        // even at critical HP. The previous death log: HP dropped to single
-        // digits while the bot was still firing pre-activated spec and
-        // switching weapons mid-combo-eat. Spec-firing burns the next attack
-        // (no DPS benefit when already dying) and weapon swaps occupy the
-        // animation slot eating wants to use.
-        // At INTERNAL_EMERGENCY_HP we eat, cancel any pre-activated spec, and
-        // skip everything else this tick. Dark-core detection still runs
-        // because being inside the core IS the thing killing us — dodging
-        // out is more important than eating in place.
+        // 1.8.9 / 1.9.4: emergency HP eat-only short-circuit + panic-tele.
+        // Pre-1.8.9 the bot would pre-activate spec, swap weapons, and act
+        // normally even at critical HP. 1.9.4 adds a panic-tele escalation:
+        // if HP is one Corp hit from death (<=8), eating clearly isn't
+        // keeping up — bail to EMERGENCY_ESCAPE (Ferox via Ring of Dueling
+        // → Games necklace → run-to-entrance → logout). Saves the trip
+        // instead of dying on the spec-weapon swap animation lock.
         int currentHpEmergency = MyPlayer.getCurrentHealth();
         if (currentHpEmergency <= INTERNAL_EMERGENCY_HP && !isDarkCorePresent()) {
+            if (currentHpEmergency <= INTERNAL_PANIC_TELE_HP) {
+                Log.warn("HP critical (" + currentHpEmergency + " <= " +
+                        INTERNAL_PANIC_TELE_HP + ") — emergency escape from Corp");
+                currentState = BotState.EMERGENCY_ESCAPE;
+                return;
+            }
             Log.warn("Emergency HP (" + currentHpEmergency + ") — eat-only mode, " +
                     "skipping spec/swap/vengeance this tick");
-            emergencyComboEat();
-            if (Combat.isSpecialAttackEnabled()) {
-                Log.info("Cancelling pre-activated spec to avoid burning it while dying");
-                Combat.activateSpecialAttack(); // toggles off
-                specWeaponReadyForUse = false;
+            // 1.9.4: try combo eat. If we have NO food (combo eat returns
+            // false), tele out — we can't recover HP and Corp keeps hitting.
+            // We don't cancel pre-activated spec here either; the extra
+            // mouse-button click is wasted motion when we should be eating
+            // or teleing. If spec auto-fires on next attack, we lose 50%
+            // energy but we're not dead — recoverable.
+            if (!emergencyComboEat()) {
+                Log.warn("No food available at emergency HP — emergency escape from Corp");
+                currentState = BotState.EMERGENCY_ESCAPE;
+                return;
             }
             return;
         }
@@ -2417,7 +2463,19 @@ public class Corp implements TribotScript {
                     Log.info("Re-activated special attack: next hit will spec again");
                 }
             } else {
-                Log.info("Spec bar exhausted — switching back to main");
+                // 1.9.4: bar drained. The Fang swap doesn't belong here — we
+                // only swap to Fang at the KILL-phase transition. While we
+                // still want more specs (phase targets unmet + Corp HP above
+                // floor + POH available), tele to POH for restoration with
+                // the spec weapon still equipped. Only when we're done
+                // dumping specs do we swap to Fang for melee finish.
+                Log.info("Spec bar exhausted");
+                if (shouldStartRestorationCycle()) {
+                    Log.info("Insta-tele to POH for restoration (spec weapon stays equipped)");
+                    currentState = BotState.PREPARING_RESTORATION_CYCLE;
+                    return;
+                }
+                Log.info("Kill phase — swapping to Fang for melee finish");
                 queueSpecWeaponSwitchBack();
             }
         }
@@ -4180,17 +4238,13 @@ public class Corp implements TribotScript {
         // User toggle: skip vengeance entirely on accounts that don't have Lunars / runes.
         if (!settings.useVengeance) return;
 
-        // Spellbook gate: if useVengeance is on but the player isn't on Lunars,
-        // the cast widget won't exist and we'd spam silent failures. Detect once,
-        // warn once, then skip vengeance for the rest of the session.
-        if (!isOnLunarSpellbook()) {
-            if (!spellbookWarningLogged) {
-                Log.warn("useVengeance is ON but Vengeance widget is not present — "
-                        + "are you on Lunars? Skipping vengeance for the rest of this session.");
-                spellbookWarningLogged = true;
-            }
-            return;
-        }
+        // 1.9.4: removed the isOnLunarSpellbook() upfront probe. The probe was
+        // returning false positives on the user's client even after the 1.9.3
+        // text-filter relaxation — Query.widgets(218).filter(path==142) didn't
+        // resolve the widget reliably across magic-tab refreshes. The cast
+        // itself logs "Vengeance widget not found at [218, 142]" if the spell
+        // actually isn't there, which is sufficient diagnosis without a
+        // session-long lockout from one bad probe.
 
         // Rune-pouch gate: we can't introspect pouch contents, but a missing
         // pouch + no loose runes is a definite cast-will-fail signal. One-shot
@@ -5098,6 +5152,21 @@ public class Corp implements TribotScript {
      */
     private void handleSpecWeaponSwitchTiming() {
         if (!specWeaponSwitchQueued || !needsToSwitchBackFromSpec) {
+            return;
+        }
+
+        // 1.9.4: HP guard. equipMainWeaponFast blocks the thread for the
+        // duration of two inventory clicks + verification (~1-2 seconds).
+        // If the bot is at critical HP, that's a death sentence —
+        // production log showed the bot eating Shark and starting the
+        // swap, then dying mid-swap because Corp kept hitting through
+        // the animation lock. Postpone the swap until HP recovers above
+        // the combo-eat threshold. The handler will be re-checked next
+        // tick.
+        int currentHp = MyPlayer.getCurrentHealth();
+        if (currentHp <= INTERNAL_COMBO_EAT_HP) {
+            Log.debug("Postponing spec-weapon switch-back: HP " + currentHp +
+                    " <= " + INTERNAL_COMBO_EAT_HP + " (eat first)");
             return;
         }
 
