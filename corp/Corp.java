@@ -8659,9 +8659,58 @@ public class Corp implements TribotScript {
 	/**
 	 * Simple dialog handling for friend name input
 	 */
+	/** 1.9.37.1: read the current text inside the friend-house input field
+	 *  (Chatbox.MES_TEXT2 — the buffer the player types into). Returns the
+	 *  cleaned string (color tags stripped, cursor markers removed) or empty
+	 *  if no input widget is visible. Used to detect "previous attempt
+	 *  already typed something — don't type again." Matches by widget name
+	 *  rather than IndexPath because this SDK's getIndexPath() encoding has
+	 *  shown to be unreliable (see 1.9.35.2). */
+	private String readFriendHouseInputText() {
+		try {
+			return Query.widgets()
+					.inRoots(162)
+					.filter(w -> {
+						String n = w.getName().orElse("");
+						return n.contains("MES_TEXT2") || n.contains("INPUT");
+					})
+					.findFirst()
+					.flatMap(w -> w.getText())
+					.map(s -> s.replaceAll("<[^>]*>", "")
+							.replaceAll("[*|_]", "")
+							.trim())
+					.orElse("");
+		} catch (Exception e) {
+			return "";
+		}
+	}
+
 	private boolean handleFriendNameDialog() {
 		String hostName = getEffectiveFriendName();
 		Log.info("Dialog appeared for host=" + hostName + ", checking widget shortcut first...");
+
+		// 1.9.37.1: if the input field already has text, the bot is still
+		// mid-processing from a previous attempt — don't type or click
+		// anything, just wait for the existing entry to resolve. User
+		// noticed the portal entry was working only ~50% of the time:
+		// failed attempts left typed text in the input, and the next
+		// retry typed AGAIN, doubling the name ("TimeToAFKTimeToAFK") so
+		// the friend lookup failed. New rule per user: "if there's already
+		// text there we should never try to type and we should just wait
+		// for it to resolve."
+		String existingInput = readFriendHouseInputText();
+		if (!existingInput.isEmpty()) {
+			Log.info("Friend-house input already contains \"" + existingInput
+					+ "\" — not typing/clicking, waiting for previous entry to resolve");
+			return Waiting.waitUntil(10000, () -> {
+				if (isInFriendHouse()) {
+					Log.info("Entered " + hostName
+							+ "'s house (previous entry resolved)");
+					return true;
+				}
+				return false;
+			});
+		}
 
 		// 1.9.15 / 1.9.16: search root 162 (chatbox) for an INTERACTIVE
 		// widget whose text contains the host name. Pre-1.9.16 we just
