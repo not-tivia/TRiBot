@@ -6282,7 +6282,25 @@ public class Corp implements TribotScript {
 		Log.info("Completed " + specsPerformed + " special attack(s), final energy: " + Combat.getSpecialAttackPercent() + "%");
 
 		specWeaponReadyForUse = false;
-		queueSpecWeaponSwitchBack();
+		// 1.9.36: only swap back to Fang if we can't fire another spec right
+		// now. Pre-1.9.36 we queued the switch unconditionally — so if spec 2
+		// of a 2-spec bar timed out (Corp out of range, occluded, etc.) we
+		// went to Fang with 50% energy still on the bar, and then a few ticks
+		// later the pre-activate path re-equipped the spec weapon to fire
+		// that remaining spec. Two wasted weapon swaps per stutter. Now:
+		// keep the spec weapon equipped if energy >= minSpecEnergy and a
+		// phase still needs specs. Kill-phase fall-through is handled by
+		// handleFightingCorp at line ~3085 (isInKillPhase guard).
+		int energyLeft = Combat.getSpecialAttackPercent();
+		boolean canSpecAgain = energyLeft >= getMinSpecEnergy()
+				&& teamPhaseNeeded() != 0
+				&& !isInKillPhase();
+		if (canSpecAgain) {
+			Log.info("Holding spec weapon (" + chosenSpecWeapon + "): "
+					+ energyLeft + "% energy left, phase targets remain");
+		} else {
+			queueSpecWeaponSwitchBack();
+		}
 		currentState = BotState.FIGHTING_CORP;
 	}
 
