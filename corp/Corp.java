@@ -8836,7 +8836,32 @@ public class Corp implements TribotScript {
 					+ "found anywhere under root 162)");
 			return false;
 		}
-		Waiting.waitNormal(700, 200);
+		// 1.9.47: dialog parent is up, but the CLICKABLE children take
+		// 1-3 more ticks to populate their bounding rects. User hypothesis
+		// confirmed: 'maybe we are starting the search for the interface
+		// before its actually opened? that would make sense.' Pre-1.9.47
+		// we waited a flat 700ms settle then proceeded; sometimes the
+		// shortcut widget click landed before its bounds existed and
+		// missed (returned true but no game action). Now: poll for the
+		// shortcut OR the input widget to be readable, up to 3s. Once
+		// either appears the dialog's child tree has finished rendering.
+		final String hostForReady = getEffectiveFriendName();
+		boolean readyForAction = Waiting.waitUntil(3000, () -> {
+			try {
+				if (findFriendHouseShortcutByText(hostForReady).isPresent()) return true;
+				return !readFriendHouseInputText().isEmpty();
+			} catch (Exception e) {
+				return false;
+			}
+		});
+		if (!readyForAction) {
+			Log.info("Dialog children not fully populated within 3s — "
+					+ "falling back to fixed 700ms settle");
+			Waiting.waitNormal(700, 200);
+		} else {
+			Log.debug("Dialog children ready for interaction");
+			Waiting.waitNormal(200, 80);
+		}
 		return handleFriendNameDialog();
 	}
 
