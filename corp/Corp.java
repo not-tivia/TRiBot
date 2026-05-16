@@ -2541,8 +2541,20 @@ public class Corp implements TribotScript {
             return;
         }
 
-        // STAY IN LOBBY - wait for team
-        Log.info("No acceptable teammates found, staying in lobby...");
+        // 1.9.27: solo engage. If Corp is alive and visible (we're in the
+        // boss room with no teammate around — e.g. teammate banking or in
+        // their own POH), don't wait forever. Engage Corp solo and keep
+        // dumping specs. User specifically asked the bot to continue
+        // spec-dumping without teammate visibility.
+        Optional<Npc> corpOpt = Query.npcs().nameEquals(CORPOREAL_BEAST).findFirst();
+        if (corpOpt.isPresent() && isCorpAlive(corpOpt.get())) {
+            Log.info("Corp visible and alive — engaging solo (no teammates around)");
+            currentState = BotState.ENTERING_COMBAT;
+            return;
+        }
+
+        // STAY IN LOBBY - wait for team OR Corp respawn
+        Log.info("No acceptable teammates found AND Corp not visible — staying in lobby...");
         Waiting.waitUntil(5000, () ->
                 hasAcceptableTeammatesInLobby() ||
                         hasAcceptableTeammatesInBossRoom() ||
