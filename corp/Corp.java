@@ -21,6 +21,32 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.15 (2026-05-16) - Flow restructuring after the user pointed out
+ *                         several order-of-operations issues:
+ *                         (a) Ferox banking now uses GlobalWalking.walkToBank
+ *                             instead of LocalWalking-walking to a fixed
+ *                             tile. Ring-of-Dueling teleport lands the
+ *                             player outside the bank's render range, so
+ *                             LocalWalking can't path. The bot was stuck
+ *                             "looking for restoration pool" forever.
+ *                         (b) Removed vengeance casting and spec prep from
+ *                             handleWaitingForTeam. Waiting for teammates
+ *                             in the lobby should be a true idle — no
+ *                             clicks, no casts. Veng gets healed off before
+ *                             we engage anyway, and lobby-prep was firing
+ *                             the failing Ice-Plateau-instead-of-Vengeance
+ *                             cast.
+ *                         (c) Both moved into handleEnteringCombat which
+ *                             runs WHILE we walk into the boss room.
+ *                             Prayer + spec-button + veng all activate as
+ *                             instant clicks during the walk, so by the
+ *                             time we see Corp everything is queued.
+ *                         (d) Friend-portal widget shortcut now searches
+ *                             root 162 by name instead of by hardcoded
+ *                             path [162, 39, 0] — same fragility we hit
+ *                             with the Vengeance widget at [218, 142].
+ *                             Path-agnostic match should resolve "Last
+ *                             name: TimeToAFK" reliably.
  *   1.9.14 (2026-05-16) - Three fixes:
  *                         (a) Vengeance now identified by NAME, not by
  *                             fixed widget path. Pre-1.9.14 we trusted
@@ -2275,18 +2301,15 @@ public class Corp implements TribotScript {
             return;
         }
 
-        // Handle vengeance logic while waiting
-        handleVengeanceLogic();
-
-        // 1.9.0: pre-spec in the lobby BEFORE walking through the passage.
-        // The pre-1.9.0 flow ran the entire prep (drink super combat, eat
-        // karambwan slot, equip spec weapon, pre-activate spec) AFTER
-        // arriving at Corp's tile — ~10 seconds standing under Corp taking
-        // damage. The passage is safe ground; do all that work here so the
-        // first hit on Corp is already a spec. prepareSpecWeaponInLobby
-        // skips the Corp-visible / Corp-alive gates that prepareSpecWeaponForCorp
-        // requires.
-        prepareSpecWeaponInLobby();
+        // 1.9.15: removed handleVengeanceLogic() and prepareSpecWeaponInLobby()
+        // from this state. Pre-1.9.15 the bot would veng + drink pot +
+        // eat karambwan + equip spec + pre-activate spec while just standing
+        // in the lobby waiting for teammates to join. Veng heals get burned
+        // off before we engage Corp, the prep happens too early (might be
+        // 30+ seconds before combat), and we kept failing the veng cast
+        // anyway (wrong widget). The new flow defers all prep to
+        // handleEnteringCombat which runs WHILE walking to the boss room,
+        // so spec/prayer/veng all activate as we approach Corp.
 
         // Check if acceptable teammates are in the boss room
         if (hasAcceptableTeammatesInBossRoom()) {
@@ -2325,6 +2348,23 @@ public class Corp implements TribotScript {
 
     private void handleEnteringCombat() {
         Log.info("Entering combat...");
+
+        // 1.9.15: prep WHILE we're walking, not after. Activate quick prayer
+        // and pre-activate the spec button as we cross the passage — both
+        // are instant clicks that don't delay the walk. Pre-1.9.15 we did
+        // all this in handleWaitingForTeam (lobby) or after Corp was visible
+        // (in-room), wasting time in both cases. Veng cast is also moved
+        // here so it lands right before combat instead of getting wasted
+        // in the lobby.
+        if (!Prayer.isQuickPrayerEnabled()) {
+            Log.info("Activating quick prayer (entering combat)");
+            Prayer.enableQuickPrayer();
+        }
+        prepareSpecWeaponInLobby();
+        // Cast vengeance while walking — heal will be active right when we
+        // start taking hits. (handleVengeanceLogic gates on settings.useVengeance
+        // and rune availability internally.)
+        handleVengeanceLogic();
 
         // Make sure we're in boss room
         if (!isInCorpBossRoom()) {
@@ -6087,28 +6127,25 @@ public class Corp implements TribotScript {
     }
 
     private void walkToFeroxBank() {
-        Log.info("Walking to Ferox Enclave bank...");
-
-        // Try to find bank chest on screen first
-        Optional<GameObject> bankChestOpt = Query.gameObjects()
-                .nameContains("Bank chest")
-                .findFirst();
-
-        if (bankChestOpt.isPresent()) {
-            Log.info("Bank chest already visible");
+        // 1.9.15: switched to GlobalWalking.walkToBank(). Pre-1.9.15 we
+        // LocalWalking-walked to a fixed tile (3150, 3625, 0) — works ONLY
+        // when the bank is already in render. Ring-of-Dueling teleport
+        // lands the player on a tile where the bank chest hasn't loaded
+        // yet, LocalWalking fails, and the bot was stuck "looking for
+        // restoration pool" with no path. GlobalWalking.walkToBank()
+        // auto-pathfinds to the nearest bank from any tile.
+        if (Query.gameObjects().nameContains("Bank chest").findFirst().isPresent()) {
+            Log.info("Bank chest already visible — no walk needed");
             return;
         }
-
-        // If not visible, walk to approximate bank location
-        WorldTile bankLocation = new WorldTile(3150, 3625, 0); // Adjust coordinates as needed
-
-        if (LocalWalking.walkTo(bankLocation)) {
-            Log.info("Walking to bank area");
-            // Wait briefly for arrival
-            Waiting.waitUntil(3000, () ->
-                    Query.gameObjects().nameContains("Bank chest").findFirst().isPresent());
-        } else {
-            Log.warn("Failed to walk to bank location");
+        Log.info("Walking to nearest bank via GlobalWalking...");
+        try {
+            org.tribot.script.sdk.walking.GlobalWalking.walkToBank();
+            Waiting.waitUntil(15000, () -> isNearFeroxBank());
+        } catch (Throwable e) {
+            Log.warn("GlobalWalking.walkToBank failed: " + e.getMessage()
+                    + " — falling back to local walk");
+            LocalWalking.walkTo(new WorldTile(3150, 3625, 0));
         }
     }
 
@@ -8028,15 +8065,15 @@ public class Corp implements TribotScript {
 		String hostName = getEffectiveFriendName();
 		Log.info("Dialog appeared for host=" + hostName + ", checking widget shortcut first...");
 
-		// Shortcut widget for the previously-visited friend lives at [162, 39, 0]
-		// and displays "Last name: <rsn>" (lowercase). We match case-insensitively
-		// and strip color tags so styled text doesn't break the comparison.
+		// 1.9.15: search root 162 (chatbox) for ANY widget whose text
+		// contains the host name (typically displayed as "Last name:
+		// TimeToAFK" after the first visit). Pre-1.9.15 used hardcoded
+		// path [162, 39, 0] which is brittle — same fragility we hit
+		// with the Vengeance widget at [218, 142]. Path-agnostic match
+		// works regardless of where the game places the shortcut widget.
 		final String hostLower = hostName == null ? "" : hostName.toLowerCase();
 		Optional<Widget> friendWidgetOpt = Query.widgets()
 				.inRoots(162)
-				.filter(w -> w.getIndexPath().length >= 3 &&
-						w.getIndexPath()[1] == 39 &&
-						w.getIndexPath()[2] == 0)
 				.filter(w -> {
 					String raw = w.getText().orElse("");
 					String clean = raw.replaceAll("<[^>]*>", "").toLowerCase();
