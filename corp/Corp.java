@@ -7846,7 +7846,7 @@ public class Corp implements TribotScript {
             lastSpecActivateAt = now;
             return true;
         }
-        if (tryActivateSpec()) { // 1.9.34
+        if (Combat.activateSpecialAttack()) { // 1.9.34.1: actual SDK call (was recursive)
             lastSpecActivateAt = now;
             return true;
         }
