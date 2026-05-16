@@ -3023,13 +3023,21 @@ public class Corp implements TribotScript {
             // 1.9.9: defer recordSpecUsed until XP confirms the hit. Pre-1.9.9
             // every spec fire (hit OR miss) bumped the phase counter, so the
             // bot rotated weapons after 4 spec ATTEMPTS instead of 4 hits.
-            // Capture the weapon used for THIS spec (chosenSpecWeapon may
-            // rotate below) and the XP baseline (snapshotted at pre-activate
-            // time, before the spec fired). processPendingSpecHit runs next
-            // tick and either confirms or misses.
+            // 1.9.41: capture the XP baseline NOW (energy just dropped), not
+            // at pre-activate time. Pre-1.9.41 we used xpAtSpec which was
+            // set when the spec button was activated — but the bot kept
+            // auto-attacking between pre-activate and the spec firing, so
+            // xpAtSpec was already stale by hundreds of XP. Any normal hit
+            // landing AFTER pre-activate but BEFORE this branch was being
+            // wrongly credited to the spec's XP delta. User: "if we get an
+            // xp drop but our spec hasnt drained (like we get a normal hit
+            // inbetween our attacks and specs) that counts as a spec dump
+            // successful." Now baseline = XP at the exact tick energy
+            // dropped — spec animation locks the player so the next XP
+            // increase HAS to be from the spec itself.
             if (chosenSpecWeapon != null) {
                 pendingHitWeapon = chosenSpecWeapon;
-                pendingHitXpBaseline = xpAtSpec;
+                pendingHitXpBaseline = getMeleeCombatXp();
                 pendingHitDeadline = System.currentTimeMillis() + HIT_CONFIRM_TIMEOUT_MS;
             }
 
@@ -5966,6 +5974,26 @@ public class Corp implements TribotScript {
             return;
         }
 
+        // 1.9.41: only honor the queued swap-back while in active combat
+        // states. Pre-1.9.41 the timer fired on every main loop tick
+        // regardless of state — so a swap queued during a spec dump
+        // would execute AFTER PREPARING_RESTORATION_CYCLE / TELEPORTING_TO_HOUSE
+        // / USING_ORNATE_POOL, leaving us at the POH with Fang equipped
+        // and the spec weapon left in inventory. On return to Corp the
+        // bot then had to re-equip the spec weapon. User: "it still
+        // switched to the fang after teleporting out even though we are
+        // still spec dumping."
+        if (currentState != BotState.FIGHTING_CORP
+                && currentState != BotState.USING_SPECIAL_ATTACK
+                && currentState != BotState.ENTERING_COMBAT
+                && currentState != BotState.HANDLING_DARK_CORE) {
+            // Cancel the queue when we leave combat. The next combat
+            // tick will re-evaluate via the standard equip logic.
+            specWeaponSwitchQueued = false;
+            needsToSwitchBackFromSpec = false;
+            return;
+        }
+
         // 1.9.4 / 1.9.26: HP guard. Pre-1.9.26 postponed the swap whenever
         // HP <= INTERNAL_COMBO_EAT_HP (50). That was correct for swapping
         // INTO a 2H spec weapon (slow animation lock) but counterproductive
@@ -8835,17 +8863,47 @@ public class Corp implements TribotScript {
 		}
 		Log.info("Verified friend-house input widget present, typing now");
 
-		// 1.9.40: state-based typing debounce — independent of widget
-		// content detection. Pre-1.9.40 (and 1.9.39's widget-text check)
-		// the bot could still double-type if readFriendHouseInputText()
-		// returned empty because the SDK didn't expose the input widget
-		// the way we expected. Track the wall-clock time of the last
-		// type and refuse to type again within FRIEND_HOUSE_TYPE_DEBOUNCE_MS.
-		long nowMs = System.currentTimeMillis();
-		if (nowMs - lastFriendHouseTypeAt < FRIEND_HOUSE_TYPE_DEBOUNCE_MS) {
-			Log.info("Friend-house typed " + (nowMs - lastFriendHouseTypeAt)
-					+ "ms ago — not typing again, waiting for resolve");
-			return Waiting.waitUntil(8000, () -> isInFriendHouse());
+		// 1.9.41: drop the 12s wall-clock debounce per user — "we dont
+		// need to wait 12 seconds. it can be like a 3000 second wait if
+		// the screen isnt open. we always teleport close to it." Replaced
+		// with a long open-dialog wait. If the screen ISN'T open, wait
+		// up to 5 minutes for it to open before bailing — the tele lands
+		// us right next to the portal so the click should resolve almost
+		// immediately if the host is online. Pre-1.9.41's 12s window
+		// could allow a double-type in slow-server scenarios.
+		long longDialogWait = 300_000L; // 5 minutes
+		boolean dialogStillOpen = Waiting.waitUntil((int) longDialogWait, () -> {
+			if (isInFriendHouse()) return true;
+			// dialog open evidence: the input widget OR a friend shortcut
+			// OR any descendant of root 162 with "Enter name:" text.
+			try {
+				return Query.widgets()
+						.inRoots(162)
+						.filter(w -> {
+							String raw = w.getText().orElse("");
+							if (raw.isEmpty()) return false;
+							String clean = raw.replaceAll("<[^>]*>", "").toLowerCase();
+							return clean.contains("enter name")
+									|| clean.contains("last name");
+						})
+						.findFirst().isPresent();
+			} catch (Exception e) {
+				return false;
+			}
+		});
+		if (isInFriendHouse()) return true;
+		if (!dialogStillOpen) {
+			Log.warn("Friend-house dialog never opened — aborting");
+			return false;
+		}
+
+		// 1.9.41: gate the actual typing on the input being empty. If text
+		// is already in it, skip — wait for the previous entry to resolve.
+		String preTypeInput = readFriendHouseInputText();
+		if (!preTypeInput.replaceAll("[^A-Za-z0-9]", "").isEmpty()) {
+			Log.info("Input already has text \"" + preTypeInput
+					+ "\" at type-time — not typing, waiting for resolve");
+			return Waiting.waitUntil(60_000, () -> isInFriendHouse());
 		}
 
 		try {
@@ -8853,7 +8911,6 @@ public class Corp implements TribotScript {
 			// is focused before we start typing.
 			Waiting.waitNormal(550, 150);
 			Keyboard.typeString(hostName);
-			lastFriendHouseTypeAt = System.currentTimeMillis(); // 1.9.40
 			Waiting.waitNormal(900, 200);
 
 			// 1.9.21: re-verify input field still exists before pressing
