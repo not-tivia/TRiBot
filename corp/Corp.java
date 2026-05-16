@@ -5097,8 +5097,23 @@ public class Corp implements TribotScript {
         // re-enables casts mid-session).
         if (!hasVengeanceRunes()) {
             if (!runePouchWarningLogged) {
+                // 1.9.60.1: dump inventory item names so we can see why
+                // the pouch isn't being detected. User: 'Rune pouch is
+                // right, idk why its not able to find it so it can
+                // cast.' If a variant name is in play, the dump will
+                // reveal it.
+                String invDump = "";
+                try {
+                    invDump = Query.inventory()
+                            .stream()
+                            .map(InventoryItem::getName)
+                            .filter(s -> s != null)
+                            .distinct()
+                            .collect(Collectors.joining(", "));
+                } catch (Exception ignored) {}
                 Log.warn("useVengeance is ON but no Rune pouch (or loose Vengeance runes) in "
-                        + "inventory — vengeance casts will fail. Skipping.");
+                        + "inventory — vengeance casts will fail. Skipping. "
+                        + "Inventory items: [" + invDump + "]");
                 runePouchWarningLogged = true;
             }
             return;
