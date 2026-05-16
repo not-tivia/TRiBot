@@ -8689,27 +8689,36 @@ public class Corp implements TribotScript {
 		String hostName = getEffectiveFriendName();
 		Log.info("Dialog appeared for host=" + hostName + ", checking widget shortcut first...");
 
-		// 1.9.37.1: if the input field already has text, the bot is still
-		// mid-processing from a previous attempt — don't type or click
-		// anything, just wait for the existing entry to resolve. User
-		// noticed the portal entry was working only ~50% of the time:
-		// failed attempts left typed text in the input, and the next
-		// retry typed AGAIN, doubling the name ("TimeToAFKTimeToAFK") so
-		// the friend lookup failed. New rule per user: "if there's already
-		// text there we should never try to type and we should just wait
-		// for it to resolve."
+		// 1.9.39: refined input check. Only skip the typing path if the
+		// existing input text is ALREADY CORRECT (== hostName, ignoring
+		// case and cursor markers). If it's correct, press Enter to submit
+		// and wait for entry to resolve. If it's wrong/partial, it's a
+		// leftover from a prior attempt — wait for the dialog to clear
+		// itself before doing anything. If empty, proceed to the normal
+		// shortcut-click / type path. Pre-1.9.39 we skipped on ANY
+		// non-empty input which got the bot stuck when the input had
+		// garbage like a stray "*" cursor.
 		String existingInput = readFriendHouseInputText();
-		if (!existingInput.isEmpty()) {
-			Log.info("Friend-house input already contains \"" + existingInput
-					+ "\" — not typing/clicking, waiting for previous entry to resolve");
-			return Waiting.waitUntil(10000, () -> {
-				if (isInFriendHouse()) {
-					Log.info("Entered " + hostName
-							+ "'s house (previous entry resolved)");
-					return true;
-				}
-				return false;
-			});
+		String hostStripped = hostName == null
+				? "" : hostName.replaceAll("[^A-Za-z0-9]", "").toLowerCase();
+		String inputStripped = existingInput
+				.replaceAll("[^A-Za-z0-9]", "").toLowerCase();
+		if (!inputStripped.isEmpty()) {
+			if (inputStripped.equals(hostStripped)) {
+				Log.info("Friend-house input already correct (\"" + existingInput
+						+ "\") — pressing Enter to submit");
+				try { Keyboard.pressEnter(); } catch (Exception ignored) {}
+				return Waiting.waitUntil(10000, () -> isInFriendHouse());
+			} else {
+				Log.info("Friend-house input has stale/wrong text \""
+						+ existingInput + "\" (want \"" + hostName
+						+ "\") — waiting for it to clear, not typing");
+				return Waiting.waitUntil(10000, () -> {
+					if (isInFriendHouse()) return true;
+					String fresh = readFriendHouseInputText();
+					return fresh.replaceAll("[^A-Za-z0-9]", "").isEmpty();
+				}) && isInFriendHouse();
+			}
 		}
 
 		// 1.9.15 / 1.9.16: search root 162 (chatbox) for an INTERACTIVE
@@ -9408,6 +9417,7 @@ public class Corp implements TribotScript {
         private final JFrame frame;
         private final JLabel stateLabel = new JLabel("State: ?");
         private final JLabel weaponLabel = new JLabel("Spec weapon: ?");
+        private final JLabel specCountsLabel = new JLabel("Specs this kill: -"); // 1.9.39
         private final JLabel killsLabel = new JLabel("Kills: 0");
         private final JLabel deathsLabel = new JLabel("Deaths: 0");
         private final JLabel runtimeLabel = new JLabel("Runtime: 0:00");
@@ -9423,6 +9433,7 @@ public class Corp implements TribotScript {
             panel.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
             panel.add(stateLabel);
             panel.add(weaponLabel);
+            panel.add(specCountsLabel);
             panel.add(killsLabel);
             panel.add(deathsLabel);
             panel.add(runtimeLabel);
@@ -9435,11 +9446,14 @@ public class Corp implements TribotScript {
             frame.setVisible(true);
         }
 
-        void update(String state, String weapon, int kills, int deaths, long runtimeMs,
+        void update(String state, String weapon, String specCounts,
+                    int kills, int deaths, long runtimeMs,
                     boolean coordEnabled, int phaseNeeded, boolean sessionEnd) {
             SwingUtilities.invokeLater(() -> {
                 stateLabel.setText("State: " + state);
                 weaponLabel.setText("Spec weapon: " + (weapon == null ? "-" : weapon));
+                specCountsLabel.setText("Specs this kill: "
+                        + (specCounts == null || specCounts.isEmpty() ? "-" : specCounts));
                 killsLabel.setText("Kills: " + kills);
                 deathsLabel.setText("Deaths: " + deaths);
                 long sec = runtimeMs / 1000;
@@ -9469,11 +9483,16 @@ public class Corp implements TribotScript {
         if (overlay == null || !settings.showOverlay) return;
         int phaseNeeded = -1;
         try {
-            if (settings.coordinatorEnabled) phaseNeeded = teamPhaseNeeded();
+            // 1.9.39: always show phase, not just when coordinator on —
+            // teamPhaseNeeded works solo via buildSoloAggregate. The
+            // coordinator gate was a leftover from when phase rotation
+            // was coordinator-only.
+            phaseNeeded = teamPhaseNeeded();
         } catch (Exception ignored) {}
         overlay.update(
                 currentState == null ? "?" : currentState.name(),
                 chosenSpecWeapon,
+                formatSpecCountsThisKill(), // 1.9.39
                 killCount,
                 deathCount,
                 System.currentTimeMillis() - scriptStartTime,
@@ -9481,6 +9500,28 @@ public class Corp implements TribotScript {
                 phaseNeeded,
                 sessionEndPending
         );
+    }
+
+    /** 1.9.39: compact "weapon=count, weapon=count" string for the overlay.
+     *  Reads mySnapshot.specsThisKill (per-kill, cleared in coordinatorOnKillEnded).
+     *  User flagged: bot kept Arclighting for 10+ minutes — counter on the
+     *  overlay will make it obvious whether specs are being RECORDED or
+     *  whether the phase target itself is unreachable. */
+    private String formatSpecCountsThisKill() {
+        try {
+            if (mySnapshot == null || mySnapshot.specsThisKill == null
+                    || mySnapshot.specsThisKill.isEmpty()) return "";
+            StringBuilder sb = new StringBuilder();
+            boolean first = true;
+            for (Map.Entry<String, Integer> e : mySnapshot.specsThisKill.entrySet()) {
+                if (!first) sb.append(", ");
+                first = false;
+                sb.append(e.getKey()).append("=").append(e.getValue());
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private void overlayClose() {
