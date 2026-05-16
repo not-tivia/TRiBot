@@ -7918,6 +7918,21 @@ public class Corp implements TribotScript {
     private boolean isCorpHealthAboveSpecThreshold(Npc corp) {
         if (!corp.isHealthBarVisible()) return false;
         double healthPercent = corp.getHealthBarPercent();
+        // 1.9.29: update + use the per-kill max tracker so a freshly-
+        // engaged Corp (bar visible but reading 0% before server populates
+        // it) doesn't make us think Corp is dying. Same fix as 1.9.28 but
+        // for this gate, which handleSpecialAttack and shouldUseSpecialAttack
+        // both depend on. Pre-1.9.29 the bot would refuse to spec on the
+        // first tick of combat because "Corp HP looks low (it's 0%)",
+        // queue a Fang swap, and the kill would devolve.
+        if (healthPercent > maxCorpHpPercentThisKill) {
+            maxCorpHpPercentThisKill = healthPercent;
+        }
+        if (maxCorpHpPercentThisKill <= 5.0) {
+            // Bar not yet populated this kill — assume Corp is at full HP,
+            // i.e. above threshold (allow spec).
+            return true;
+        }
         int approxHp = (int) ((healthPercent / 100.0) * 2000);
         return approxHp >= settings.corpMinHpForSpec;
 	}
