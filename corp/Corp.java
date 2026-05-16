@@ -21,6 +21,21 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.18 (2026-05-16) - Fix vengeance trigger logic. 1.9.17 made
+ *                         handleReadyForFirstCast a no-op and relied on
+ *                         ACTIVE_CASTING (which fires after damage taken).
+ *                         But ACTIVE_CASTING triggers on ANY damage,
+ *                         including the damage we take during spec dump
+ *                         — so veng would still fire mid-spec-dump and
+ *                         the heal would be wasted before the kill.
+ *                         User clarified the real intent: cast vengeance
+ *                         only during the KILL PHASE — defined as
+ *                         (teamPhaseNeeded() == 0) OR (Corp HP <
+ *                         corpMinHpForSpec). New isInKillPhase() helper;
+ *                         handleVengeanceLogic returns early if not in
+ *                         kill phase. handleReadyForFirstCast restored
+ *                         to its original logic — gate is now the
+ *                         top-level kill-phase check.
  *   1.9.17 (2026-05-16) - Three fixes after the 1.9.16 test:
  *                         (a) Phase rotation timing. The in-line detector
  *                             was calling refreshSpecWeaponForPhase BEFORE
@@ -4618,6 +4633,18 @@ public class Corp implements TribotScript {
         // User toggle: skip vengeance entirely on accounts that don't have Lunars / runes.
         if (!settings.useVengeance) return;
 
+        // 1.9.18: explicit kill-phase gate. Vengeance only fires when we've
+        // either dumped enough specs (teamPhaseNeeded() == 0) OR Corp HP
+        // has dropped below corpMinHpForSpec (1700). Pre-1.9.18 the
+        // READY_FOR_FIRST_CAST branch would cast in the lobby and
+        // ACTIVE_CASTING would fire as soon as we took ANY damage —
+        // including the damage we take while spec-dumping. The heal got
+        // wasted. Now we explicitly skip veng during pre-engagement and
+        // spec-dump phases.
+        if (!isInKillPhase()) {
+            return;
+        }
+
         // 1.9.4: removed the isOnLunarSpellbook() upfront probe. The probe was
         // returning false positives on the user's client even after the 1.9.3
         // text-filter relaxation — Query.widgets(218).filter(path==142) didn't
@@ -4659,16 +4686,39 @@ public class Corp implements TribotScript {
 
     // ========== STATE HANDLERS ==========
     private void handleReadyForFirstCast(boolean bossAlive) {
-        // 1.9.17: don't cast vengeance during pre-engagement or spec-dump
-        // phase. User said: "we still veng and do things we dont want to
-        // do until we actually start killing it outside of spec dumping."
-        // The first-cast lobby trigger would burn vengeance HP on damage
-        // we never take (lobby is safe, spec-dump bot isn't melee-tanking
-        // Corp). ACTIVE_CASTING state (after we've taken real damage) is
-        // where vengeance belongs. Effectively makes READY_FOR_FIRST_CAST
-        // a no-op until updateHealthTracking sees HP drop and switches us
-        // to ACTIVE_CASTING.
-        return;
+        // Can cast when: boss is dead OR we're in lobby
+        boolean canCastNow = !bossAlive || isInCorpLobby();
+        boolean recentlyCastWithoutDamage = hasRecentVengeanceCastWithoutDamage();
+
+        if (canCastNow && canCastVengeance() && !recentlyCastWithoutDamage) {
+            if (castVengeance()) {
+                Log.info("Cast first vengeance (ready state) — will protect until first damage taken");
+            }
+        } else if (recentlyCastWithoutDamage) {
+            Log.debug("Skipping vengeance cast - recently cast and no damage taken yet");
+        }
+    }
+
+    /** 1.9.18: are we in the kill phase (post-spec-dump)? Vengeance only
+     *  belongs here. Two triggers per the user's strategy:
+     *    (a) teamPhaseNeeded() == 0  — all phase targets met, no more
+     *        spec dumping wanted, time to melee finish
+     *    (b) Corp HP visible AND below corpMinHpForSpec (1700) — a
+     *        teammate is killing Corp, spec dumping is pointless, switch
+     *        to melee
+     *  Returning false during pre-engagement, walks, and spec-dump phases
+     *  short-circuits handleVengeanceLogic so no veng cast fires while
+     *  it'd be wasted.
+     */
+    private boolean isInKillPhase() {
+        if (teamPhaseNeeded() == 0) return true;
+        Optional<Npc> corpOpt = Query.npcs().nameEquals(CORPOREAL_BEAST).findFirst();
+        if (!corpOpt.isPresent()) return false;
+        Npc corp = corpOpt.get();
+        if (!corp.isHealthBarVisible()) return false;
+        double hpPercent = corp.getHealthBarPercent();
+        int approxHp = (int) ((hpPercent / 100.0) * 2000);
+        return approxHp < settings.corpMinHpForSpec;
     }
 
     private boolean hasRecentVengeanceCastWithoutDamage() {
