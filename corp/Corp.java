@@ -8597,15 +8597,33 @@ public class Corp implements TribotScript {
 		}
 		Log.info("Clicked 'Friend's house', waiting for dialog...");
 
-		// 1.9.16: wait for the typing dialog AND a render settle delay.
-		// Chatbox.isOpen() can return true the same tick the dialog opens
-		// but the child widgets (incl. the friend shortcut) take 1-2 more
-		// ticks to populate their bounding rectangles. Pre-1.9.16 we
-		// queried widgets immediately after isOpen, hit a still-empty
-		// widget tree, fell through to a stale widget reference, and
-		// widget.click() ended up clicking a far-away ground tile.
-		if (!Waiting.waitUntil(5000, () -> Chatbox.isOpen())) {
-			Log.warn("Friend's-house dialog did not open within 5s");
+		// 1.9.35.1: detect the dialog by looking for ITS widgets — the
+		// friend shortcut at [162, 39, *] or the name-input field at
+		// [162, 44]. Pre-1.9.35.1 we used Chatbox.isOpen() but the user
+		// confirmed the POH host has never been offline yet the bot kept
+		// reporting "did not open within 5s" — meaning Chatbox.isOpen()
+		// returns false even when the friend's-house modal IS open.
+		// Different widget root than Chatbox's. Wait up to 5s for the
+		// dialog widgets themselves, then a brief settle so children
+		// populate their bounding rectangles before handleFriendNameDialog
+		// tries to read text from them.
+		boolean dialogOpened = Waiting.waitUntil(5000, () -> {
+			boolean inputField = Query.widgets()
+					.inRoots(162)
+					.filter(w -> w.getIndexPath().length == 2
+							&& w.getIndexPath()[1] == 44)
+					.findFirst().isPresent();
+			if (inputField) return true;
+			boolean friendShortcut = Query.widgets()
+					.inRoots(162)
+					.filter(w -> w.getIndexPath().length >= 2
+							&& w.getIndexPath()[1] == 39)
+					.findFirst().isPresent();
+			return friendShortcut;
+		});
+		if (!dialogOpened) {
+			Log.warn("Friend's-house dialog did not open within 5s "
+					+ "(neither [162, 44] input nor [162, 39, *] shortcut found)");
 			return false;
 		}
 		Waiting.waitNormal(700, 200);
