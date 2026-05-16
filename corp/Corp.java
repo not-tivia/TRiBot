@@ -5069,29 +5069,14 @@ public class Corp implements TribotScript {
      *  Rune pouch (or Divine variant, contents not introspectable without
      *  opening it) or all loose runes in inventory. */
     private boolean hasVengeanceRunes() {
-        // 1.9.60: match ANY item whose name contains "rune pouch" (case
-        // insensitive) — covers "Rune pouch", "Divine rune pouch", and
-        // variants like "Rune pouch (l)" or coloured/upgraded pouches.
-        // Pre-1.9.60 we matched only the exact strings "Rune pouch" and
-        // "Divine rune pouch" via Inventory.contains, so any variant
-        // failed the check. User: 'we have a rune pouch with the current
-        // runes, we should be trying to cast it.'
-        boolean hasPouch;
-        try {
-            hasPouch = Query.inventory()
-                    .filter(item -> {
-                        String n = item.getName();
-                        return n != null && n.toLowerCase().contains("rune pouch");
-                    })
-                    .findFirst()
-                    .isPresent();
-        } catch (Exception e) {
-            hasPouch = false;
-        }
-        if (hasPouch) return true;
-        return Inventory.contains("Astral rune")
-                && Inventory.contains("Death rune")
-                && Inventory.contains("Earth rune");
+        // 1.9.66: ALWAYS return true. User: 'can we just return it as
+        // true even though we are failing to grab it for some reason?
+        // i have thousands of casts ready.' The runtime detection of
+        // the rune pouch was unreliable across SDK quirks; user has
+        // thousands of casts stockpiled so a worst-case failed cast
+        // (no runes / cooldown) costs one wasted click, much cheaper
+        // than the current 'never cast' failure mode.
+        return true;
     }
 
     /** Probe the magic-tab widget tree for the Vengeance spell. Returns true
