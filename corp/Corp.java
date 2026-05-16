@@ -8863,16 +8863,14 @@ public class Corp implements TribotScript {
 		}
 		Log.info("Verified friend-house input widget present, typing now");
 
-		// 1.9.41: drop the 12s wall-clock debounce per user — "we dont
-		// need to wait 12 seconds. it can be like a 3000 second wait if
-		// the screen isnt open. we always teleport close to it." Replaced
-		// with a long open-dialog wait. If the screen ISN'T open, wait
-		// up to 5 minutes for it to open before bailing — the tele lands
-		// us right next to the portal so the click should resolve almost
-		// immediately if the host is online. Pre-1.9.41's 12s window
-		// could allow a double-type in slow-server scenarios.
-		long longDialogWait = 300_000L; // 5 minutes
-		boolean dialogStillOpen = Waiting.waitUntil((int) longDialogWait, () -> {
+		// 1.9.41.1: 3-5 second dialog wait, NOT 5 minutes — user clarified
+		// "we want to wait no more than 3-5 SECONDS." The teleport drops
+		// us right next to the portal so the dialog should open within a
+		// couple of ticks; if it doesn't, the click missed or the host
+		// dropped the dialog and we should bail to a fresh attempt
+		// rather than camping for minutes.
+		int longDialogWait = 5_000;
+		boolean dialogStillOpen = Waiting.waitUntil(longDialogWait, () -> {
 			if (isInFriendHouse()) return true;
 			// dialog open evidence: the input widget OR a friend shortcut
 			// OR any descendant of root 162 with "Enter name:" text.
@@ -8903,7 +8901,8 @@ public class Corp implements TribotScript {
 		if (!preTypeInput.replaceAll("[^A-Za-z0-9]", "").isEmpty()) {
 			Log.info("Input already has text \"" + preTypeInput
 					+ "\" at type-time — not typing, waiting for resolve");
-			return Waiting.waitUntil(60_000, () -> isInFriendHouse());
+			// 1.9.41.1: 5s, not 60s — keep waits short, retry quickly.
+			return Waiting.waitUntil(5_000, () -> isInFriendHouse());
 		}
 
 		try {
