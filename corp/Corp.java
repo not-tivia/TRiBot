@@ -8724,20 +8724,41 @@ public class Corp implements TribotScript {
 	/**
 	 * Simple dialog handling for friend name input
 	 */
-	/** 1.9.37.1: read the current text inside the friend-house input field
-	 *  (Chatbox.MES_TEXT2 — the buffer the player types into). Returns the
-	 *  cleaned string (color tags stripped, cursor markers removed) or empty
-	 *  if no input widget is visible. Used to detect "previous attempt
-	 *  already typed something — don't type again." Matches by widget name
-	 *  rather than IndexPath because this SDK's getIndexPath() encoding has
-	 *  shown to be unreliable (see 1.9.35.2). */
+	/** 1.9.42: detect typed text in the friend-house input field by SCANNING
+	 *  widget text under root 162 for the host name itself. Pre-1.9.42 we
+	 *  tried to find the input widget by Widget.getName() returning
+	 *  "Chatbox.MES_TEXT2" — turns out that's the widget-inspector display
+	 *  string, not what the SDK exposes at runtime. So readFriendHouseInputText
+	 *  always returned "" and the "don't re-type if input already has text"
+	 *  gate was a no-op. User: "the name was already there and we still
+	 *  tried to type."
+	 *
+	 *  New approach: walk every widget under root 162 and return the FIRST
+	 *  text content that:
+	 *    - contains the host name as alphanumerics (case-insensitive), AND
+	 *    - does NOT start with "Enter name:" (the prompt label), AND
+	 *    - does NOT start with "Last name:" (the shortcut row)
+	 *  Anything else carrying the host name has to be the typed input.
+	 *  Returns "" if no such widget exists (input is empty / dialog not
+	 *  open / no host name typed yet). */
 	private String readFriendHouseInputText() {
+		String hostName = getEffectiveFriendName();
+		if (hostName == null) return "";
+		final String hostStripped = hostName
+				.replaceAll("[^A-Za-z0-9]", "").toLowerCase();
+		if (hostStripped.isEmpty()) return "";
 		try {
 			return Query.widgets()
 					.inRoots(162)
 					.filter(w -> {
-						String n = w.getName().orElse("");
-						return n.contains("MES_TEXT2") || n.contains("INPUT");
+						String raw = w.getText().orElse("");
+						if (raw.isEmpty()) return false;
+						String clean = raw.replaceAll("<[^>]*>", "").trim();
+						String lower = clean.toLowerCase();
+						if (lower.startsWith("enter name")) return false;
+						if (lower.startsWith("last name")) return false;
+						String alphanum = lower.replaceAll("[^A-Za-z0-9]", "");
+						return alphanum.contains(hostStripped);
 					})
 					.findFirst()
 					.flatMap(w -> w.getText())
