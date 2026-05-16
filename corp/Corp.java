@@ -1602,18 +1602,16 @@ public class Corp implements TribotScript {
     private boolean isVengeanceSelfWidget(Widget w) {
         if (w == null) return false;
         if (!w.getActions().contains("Cast")) return false;
-        // 1.9.14: identify Vengeance Self by NAME instead of by fixed widget
-        // path. Pre-1.9.14 we trusted indexPath[1] == 142 to be Vengeance
-        // Self, but the widget tree shifts between game versions/spellbook
-        // pages and on this user's client 142 is actually Ice Plateau
-        // Teleport — bot kept teleporting to Ice Plateau instead of casting
-        // Vengeance. Now we sample every name source the SDK exposes
-        // (getName / getComponentName / getText) and require "vengeance"
-        // appear in at least one of them. Vengeance Other is excluded by
-        // the "other" check.
+        // 1.9.14 / 1.9.15.1: identify Vengeance Self by NAME, not fixed
+        // widget path. Pre-1.9.14 we trusted indexPath[1] == 142 to be
+        // Vengeance Self, but the widget tree shifts between game versions
+        // and on this user's client [218, 142] is Ice Plateau Teleport.
+        // Widget.getName() returns Optional<String> directly (not String);
+        // Widget.getComponentName() doesn't exist on this SDK build. So
+        // we sample getName() + getText() and require "vengeance" in
+        // at least one. "other" excluded to skip Vengeance Other.
         String combined = "";
-        try { combined += " " + Optional.ofNullable(w.getName()).orElse(""); } catch (Throwable ignored) {}
-        try { combined += " " + Optional.ofNullable(w.getComponentName()).orElse(""); } catch (Throwable ignored) {}
+        try { combined += " " + w.getName().orElse(""); } catch (Throwable ignored) {}
         combined += " " + w.getText().orElse("");
         String clean = combined.replaceAll("<[^>]*>", "").trim().toLowerCase();
         if (!clean.contains("vengeance")) return false;
