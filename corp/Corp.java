@@ -3229,10 +3229,28 @@ public class Corp implements TribotScript {
             drinkPrayerPotionDuringMovement();
         }
 
-        // If the core is gone, swap back to Fang and resume Corp.
+        // 1.9.44: hysteresis on "core gone" before swapping back. The core
+        // ducks in and out of render between ticks, and pre-1.9.44 every
+        // out-of-render tick triggered a full Fang swap that immediately
+        // got reverted to maul next tick. User: 'the state couldnt decide
+        // if we were fighting core or killing corp ... ideally we can
+        // check the distance ... and if its the closest to us just keep
+        // our elder maul out so we dont accidently get stuck in a state
+        // of toggling back and forth between weapons.' Now: stay in
+        // HANDLING_DARK_CORE (maul equipped) for 3 seconds after the
+        // last sighting before reverting to Fang.
+        final long CORE_GRACE_MS = 3000;
         Optional<Npc> coreOpt = findDarkCore();
         if (!coreOpt.isPresent()) {
-            Log.info("Dark core gone - re-equipping main weapon and resuming Corp");
+            long sinceSeen = System.currentTimeMillis() - darkCoreLastSeen;
+            if (darkCoreLastSeen > 0 && sinceSeen < CORE_GRACE_MS) {
+                Log.debug("Dark core not visible (since="
+                        + sinceSeen + "ms < " + CORE_GRACE_MS
+                        + "ms grace) - holding kill weapon");
+                return;
+            }
+            Log.info("Dark core gone (>" + CORE_GRACE_MS
+                    + "ms grace expired) - re-equipping main weapon");
             equipMainWeaponFast();
             currentState = BotState.FIGHTING_CORP;
             return;
@@ -3251,10 +3269,15 @@ public class Corp implements TribotScript {
         }
 
         // PRIORITY 3: am I the bot the core landed on? Adjacency check.
+        // 1.9.44 follow-up: user clarified the lock should persist UNTIL
+        // THE CORE IS KILLED — don't release the maul just because a
+        // teammate happens to be closer for a tick. Keep maul equipped
+        // for the whole core lifetime; only the grace timer above gates
+        // the swap-back to Fang, which fires on core-killed (gone for
+        // > CORE_GRACE_MS).
         WorldTile myPos = MyPlayer.getTile();
         if (myPos == null) return;
         double dist = myPos.distanceTo(core.getTile());
-
         if (dist > 1.5) {
             Log.debug("Dark core present but not on me (dist=" + dist + ") - holding kill weapon");
             return;
@@ -6928,7 +6951,48 @@ public class Corp implements TribotScript {
             Waiting.waitUntil(1000, () ->
                     !Query.inventory().nameEquals(itemToDeposit.get().getName()).findFirst().isPresent());
         }
+        // 1.9.44: also deposit DUPLICATES of single-keep essentials. User: 'if
+        // we have a full inventory of gear but no sharks we still try to
+        // withdraw sharks instead of dynamically just ignoring them' — the
+        // root cause was extras of items the keep-filter approves (multiple
+        // rings, multiple rune pouches, two defenders, two house tabs, ...).
+        // Nothing was deposit-eligible, the inventory stayed full of keep
+        // items, and the food/potion withdraws ran into 'cannot fit'. We
+        // need exactly ONE of each of: rune pouch, defender, charged ring,
+        // charged necklace, house tab. Spec weapons, potions, food keep
+        // their existing target-count gating downstream.
+        depositSingleKeepDuplicates();
         return true;
+    }
+
+    /** 1.9.44: deposit anything beyond the first instance of items where we
+     *  only ever need ONE. Keeps the existing keep-set intact for the first
+     *  of each item, deposits the rest. Idempotent; safe to call after the
+     *  main deposit pass. */
+    private void depositSingleKeepDuplicates() {
+        // Single-instance keep items: name + max-keep.
+        java.util.Map<String, Integer> singles = new java.util.LinkedHashMap<>();
+        singles.put(RUNE_POUCH, 1);
+        singles.put(DIVINE_RUNE_POUCH, 1);
+        for (String d : DEFENDER_PRIORITY) singles.put(d, 1);
+        for (int dose = 8; dose >= 1; dose -= 2) singles.put("Ring of dueling(" + dose + ")", 1);
+        for (int dose = 8; dose >= 1; dose -= 2) singles.put("Games necklace(" + dose + ")", 1);
+        singles.put("Teleport to house", 1);
+        singles.put("Construct. cape", 1);
+        singles.put("Construct. cape(t)", 1);
+
+        for (java.util.Map.Entry<String, Integer> e : singles.entrySet()) {
+            int have;
+            try { have = Inventory.getCount(e.getKey()); } catch (Exception ex) { continue; }
+            int max = e.getValue();
+            if (have > max) {
+                int excess = have - max;
+                Log.info("Banking: depositing " + excess + " excess " + e.getKey()
+                        + " (keeping " + max + ")");
+                try { Bank.deposit(e.getKey(), excess); } catch (Exception ignored) {}
+                Waiting.waitNormal(250, 80);
+            }
+        }
     }
 
 	private boolean withdrawBankingItems() {
