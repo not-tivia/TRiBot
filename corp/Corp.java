@@ -8103,28 +8103,23 @@ public class Corp implements TribotScript {
 		// least one action OR an explicit visible/clickable state, so
 		// the label widget gets filtered out.
 		final String hostLower = hostName == null ? "" : hostName.toLowerCase();
+		// 1.9.16.2: use the Query-builder .isVisible() filter (same pattern
+		// castVengeanceWidget uses). Widget.isHidden() and
+		// Widget.isBeingDrawn() aren't public on this SDK build despite
+		// appearing in the obfuscated strings dump.
 		Optional<Widget> friendWidgetOpt = Query.widgets()
 				.inRoots(162)
+				.isVisible()
 				.filter(w -> {
 					String raw = w.getText().orElse("");
 					String clean = raw.replaceAll("<[^>]*>", "").toLowerCase();
 					return clean.contains(hostLower);
 				})
 				.filter(w -> {
-					// 1.9.16: require an action AND not-hidden. Pre-1.9.16
-					// text-only label widgets matched the text filter but
-					// had no actions (or zero-sized bounds), and
-					// widget.click() fell through to a ground click — bot
-					// walked off into the distance instead of teleing.
-					// 1.9.16.1: isBeingDrawn() isn't part of the public
-					// SDK; rely on getActions() + !isHidden().
+					// Require an action — text-only label widgets have
+					// none and clicking them ground-clicks.
 					try {
-						if (w.getActions() == null || w.getActions().isEmpty()) return false;
-					} catch (Throwable ignored) {
-						return false;
-					}
-					try {
-						return !w.isHidden();
+						return w.getActions() != null && !w.getActions().isEmpty();
 					} catch (Throwable ignored) {
 						return false;
 					}
