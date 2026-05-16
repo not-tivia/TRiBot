@@ -6317,14 +6317,26 @@ public class Corp implements TribotScript {
 
 				if (specExecuted) {
 					specsPerformed++;
-					// Phase D: for BGS, capture the actual hitsplat damage rather than the +30 approximation.
+					// 1.9.43: hitsplat verification for ALL spec weapons. Pre-1.9.43
+					// non-BGS specs called recordSpecUsed unconditionally on energy
+					// drop, counting MISSES the same as HITS. User: "I did 10 specs
+					// and it counted all of them as successful" — Corp's high
+					// defence vs Arclight can produce ~20-30% miss rates and we
+					// were overcounting phase progress accordingly. Now wait for
+					// the hitsplat to land and only record if non-zero (a "0"
+					// splat is a miss / splash). BGS path stays the same since
+					// it already used hitsplat for damage tracking.
+					Waiting.waitNormal(600, 200); // let hitsplat register
+					int dmg = getMyLargestRecentHitOnCorp(corp);
 					if ("Bandos godsword".equalsIgnoreCase(chosenSpecWeapon)) {
-						Waiting.waitNormal(600, 200); // let hitsplat register
-						int dmg = getMyLargestRecentHitOnCorp(corp);
 						recordSpecUsed(chosenSpecWeapon, dmg);
 						Log.info("BGS spec dealt ~" + dmg + " damage (recorded for team phase 3)");
-					} else {
+					} else if (dmg > 0) {
 						recordSpecUsed(chosenSpecWeapon);
+						Log.info("Spec HIT confirmed (" + dmg + " dmg) for " + chosenSpecWeapon);
+					} else {
+						Log.info("Spec MISS for " + chosenSpecWeapon
+								+ " (no hitsplat) — not counted");
 					}
 					int energyAfter = Combat.getSpecialAttackPercent();
 					Log.info("Special attack " + specsPerformed + "/" + maxSpecs + " executed successfully! Energy: " + energyBefore + "% → " + energyAfter + "%");
@@ -6654,20 +6666,24 @@ public class Corp implements TribotScript {
     }
 
     private void walkToFeroxBank() {
-        // 1.9.15.1: GlobalWalking.walkToBank() has no location parameter
-        // and picks the SDK-determined nearest bank — that could be
-        // Castle Wars or wherever the pathfinder picks. We specifically
-        // want the FEROX bank since we just Ring-of-Dueling'd in. Use
-        // GlobalWalking.walkTo with the Ferox bank chest tile directly.
+        // 1.9.43: user specified tile (3135, 3630, 0) — close enough to
+        // BOTH the bank chest and the restoration fountains in a single
+        // landing. Pre-1.9.43 we used (3128, 3631) which was on the far
+        // side of the bank chest and sometimes left the bot in a spot
+        // where neither the chest nor the pool was reachable in one
+        // interact. User: "We want to specifically walk 3135,3630 tile
+        // and that will put us close enough to interact with the
+        // fountains and the bank chest."
         if (Query.gameObjects().nameContains("Bank chest").findFirst().isPresent()) {
             Log.info("Bank chest already visible — no walk needed");
             return;
         }
-        Log.info("Walking to Ferox bank chest via GlobalWalking...");
-        WorldTile feroxBankTile = new WorldTile(3128, 3631, 0);
+        Log.info("Walking to Ferox bank/fountain tile (3135, 3630)...");
+        WorldTile feroxBankTile = new WorldTile(3135, 3630, 0);
         try {
             org.tribot.script.sdk.walking.GlobalWalking.walkTo(feroxBankTile);
-            Waiting.waitUntil(15000, () -> isNearFeroxBank());
+            Waiting.waitUntil(15000, () -> isNearFeroxBank()
+                    || MyPlayer.getTile().distanceTo(feroxBankTile) <= 3);
         } catch (Throwable e) {
             Log.warn("GlobalWalking.walkTo(Ferox bank) failed: " + e.getMessage()
                     + " — falling back to local walk");
@@ -7618,6 +7634,22 @@ public class Corp implements TribotScript {
     }
 
     private boolean shouldEmergencyEscape() {
+        // 1.9.43: if we're already safely OUT of the boss room or in a
+        // safe-state transition (banking/emergency/teleporting/etc.),
+        // don't re-trigger emergency escape. Pre-1.9.43 the trigger fired
+        // every tick on "out of food + HP < 75"; after the first tele to
+        // Ferox the bot was still out of food (banking step hadn't run
+        // yet) and shouldEmergencyEscape re-fired, forcing another
+        // Ring-of-Dueling tele. The user watched it burn an entire
+        // ring's worth of charges in seconds.
+        try { if (isAtFeroxEnclave()) return false; } catch (Exception ignored) {}
+        if (currentState == BotState.EMERGENCY_ESCAPE
+                || currentState == BotState.BANKING_AND_HEALING
+                || currentState == BotState.STARTING
+                || currentState == BotState.DEATH_RECOVERY
+                || currentState == BotState.W330_RESTORATION) {
+            return false;
+        }
 
         if (startedFightingWithTeammates) {
             // Only escape if out of food AND health < 75
@@ -7743,7 +7775,19 @@ public class Corp implements TribotScript {
         // checks inside handleSpecialAttack. Spec firing here just needs
         // energy + in-combat + Corp present.
         Optional<Npc> corpOpt = Query.npcs().nameEquals(CORPOREAL_BEAST).findFirst();
-        return corpOpt.isPresent();
+        if (!corpOpt.isPresent()) return false;
+
+        // 1.9.43: also gate on having a usable spec weapon for the
+        // currently-needed team phase. Pre-1.9.43 this returned true the
+        // moment energy was available, even at phase 3 with no BGS
+        // owned. handleSpecialAttack would then refreshSpecWeaponForPhase
+        // -> null -> "No usable spec weapon for current team phase -
+        // falling through to DPS" and return to FIGHTING_CORP. The
+        // pre-activate check would re-arm spec, shouldUseSpecialAttack
+        // re-triggered, state churn looped 30+ times/second. User log
+        // showed the bot in this loop right before the dark core spawn.
+        if (pickSpecWeaponForCurrentPhase() == null) return false;
+        return true;
     }
 
     /**
