@@ -21,6 +21,18 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.3 (2026-05-16) - Fix vengeance not casting. The isVengeanceSelfWidget
+ *                        filter (added in 1.7.4 to guard against Vengeance
+ *                        Other) required widget text to contain "vengeance"
+ *                        — but Lunar spellbook widgets are sprite-based and
+ *                        may return empty text via getText().orElse(""). The
+ *                        path filter (root 218, child 142) already uniquely
+ *                        identifies Vengeance Self; the text-contains check
+ *                        rejected the real widget when text was empty,
+ *                        causing isOnLunarSpellbook() to return false and
+ *                        the entire vengeance system to silently skip every
+ *                        cast for the session. Dropped the text-contains-
+ *                        vengeance requirement; kept the "other" guard.
  *   1.9.2 (2026-05-16) - Fix spec-button spam-click. The in-line spec detector
  *                        triggered on "energy < 100" which is true continuously
  *                        after spec #1 — every loop iteration fired the
@@ -1278,10 +1290,18 @@ public class Corp implements TribotScript {
     private boolean isVengeanceSelfWidget(Widget w) {
         if (w == null) return false;
         if (!w.getActions().contains("Cast")) return false;
+        // 1.9.3: don't require text to contain "vengeance". Lunar spellbook
+        // widgets are sprite-based and may return empty text via getText().
+        // The path filter (root 218, child 142) already uniquely identifies
+        // the Vengeance Self spell — the pre-1.9.3 text-contains check was
+        // rejecting the legitimate widget when text was empty, causing
+        // isOnLunarSpellbook() to return false and the entire vengeance
+        // system to silently skip every cast for the session. Keep the
+        // "other" guard as a belt-and-suspenders check in case any
+        // Vengeance Other widget ever shares the path.
         String raw = w.getText().orElse("");
-        String clean = raw.replaceAll("<[^>]*>", "").trim();
-        if (!clean.toLowerCase().contains("vengeance")) return false;
-        if (clean.toLowerCase().contains("other")) return false;
+        String clean = raw.replaceAll("<[^>]*>", "").trim().toLowerCase();
+        if (clean.contains("other")) return false;
         return true;
     }
 
