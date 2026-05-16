@@ -6004,6 +6004,39 @@ public class Corp implements TribotScript {
 		WorldTile claimed = pickCoordinatedCorpPosition(corp);
 		if (claimed != null && isPositionSafeFromCorpHitbox(claimed, corp)) {
 			Log.info("Coordinator: claimed offset, target tile " + claimed);
+			// 1.9.68: same hitbox-cross check as the non-coordinator
+			// path. With 4-5 players each bot is assigned a different
+			// cardinal — the bot on the FAR side from the entrance has
+			// to flank around Corp to reach its tile. If the straight
+			// line crosses Corp's hitbox, walk via an L-shape corner
+			// first; if no safe corner exists, delegate to game
+			// pathfinder via corp.interact('Attack').
+			WorldTile myPosClaim = MyPlayer.getTile();
+			Area corpAreaClaim = corp.getArea();
+			if (myPosClaim != null && corpAreaClaim != null
+					&& lineCrossesCorp(myPosClaim, claimed, corpAreaClaim)) {
+				WorldTile corner = pickCornerWaypoint(myPosClaim, claimed,
+						corpAreaClaim.getCenter(), corpAreaClaim);
+				if (corner != null) {
+					Log.info("Claimed tile " + claimed + " requires crossing Corp — "
+							+ "L-shape via corner " + corner);
+					LocalWalking.walkTo(corner);
+					Waiting.waitUntil(8000, () -> {
+						WorldTile cur = MyPlayer.getTile();
+						if (cur == null) return false;
+						if (corpAreaClaim.contains(cur)) return false;
+						if (cur.distanceTo(corner) <= 1) return true;
+						return !lineCrossesCorp(cur, claimed, corpAreaClaim);
+					});
+				} else {
+					Log.info("Claimed tile requires crossing Corp, no safe "
+							+ "corner — corp.interact('Attack')");
+					if (corp.interact("Attack")) {
+						return Waiting.waitUntil(6000, () ->
+								isPlayerInCombat() || MyPlayer.isAnimating());
+					}
+				}
+			}
 			if (LocalWalking.walkTo(claimed)) {
 				return Waiting.waitUntil(5000, () ->
 						MyPlayer.getTile().distanceTo(claimed) <= 2);
