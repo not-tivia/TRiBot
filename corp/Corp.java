@@ -2056,11 +2056,9 @@ public class Corp implements TribotScript {
             detectAndSetSpecWeapon();
         }
 
-        boolean equipped = Equipment.contains(chosenSpecWeapon);
-        if (equipped) {
-            Log.debug("Chosen spec weapon equipped: " + chosenSpecWeapon);
-        }
-        return equipped;
+        // 1.9.58.1: dropped the per-call log. This is called every tick
+        // (often multiple times per tick) and was spamming the log.
+        return Equipment.contains(chosenSpecWeapon);
     }
 
     /**
@@ -3113,9 +3111,22 @@ public class Corp implements TribotScript {
 		// to main weapon. Without this the bot just auto-attacks ("pokes")
 		// with Arclight/Elder maul for the rest of the kill — much lower
 		// DPS than Fang. Skip the swap if a switch-back is already queued.
+		// 1.9.58.1: also swap when there's no usable spec weapon for the
+		// current team phase (e.g. phase 3 needed but bot doesn't own
+		// BGS). User log: with phase 3 needed and no BGS, bot stood
+		// poking with Arclight forever — no spec firing, no restoration
+		// cycle (1.9.58 fix), no weapon swap. Now we swap to Fang for
+		// proper melee DPS.
+		boolean noSpecWeaponForPhase = pickSpecWeaponForCurrentPhase() == null
+				&& teamPhaseNeeded() > 0;
 		if (isSpecWeaponEquipped() && !specWeaponSwitchQueued
-				&& isInKillPhase()) {
-			Log.info("Kill phase reached with spec weapon still equipped — queueing Fang swap");
+				&& (isInKillPhase() || noSpecWeaponForPhase)) {
+			Log.info("Spec weapon still equipped with "
+					+ (isInKillPhase()
+							? "kill phase reached"
+							: "no spec weapon owned for phase "
+									+ teamPhaseNeeded())
+					+ " — queueing Fang swap");
 			queueSpecWeaponSwitchBack();
 		}
 
@@ -7145,8 +7156,7 @@ public class Corp implements TribotScript {
 		// tele cycle kicked in with no Phase-3 weapon to actually use.
 		boolean haveWeaponForCurrentPhase = pickSpecWeaponForCurrentPhase() != null;
 		if (!haveWeaponForCurrentPhase) {
-			Log.debug("shouldStartRestorationCycle: NO — no spec weapon "
-					+ "owned for current team phase (we'd tele for nothing)");
+			// 1.9.58.1: dropped the per-tick log spam.
 			return false;
 		}
 		// 1.9.6: dropped corpHealthAboveFloor from this gate. The Corp-HP
