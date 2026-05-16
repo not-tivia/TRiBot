@@ -3333,28 +3333,45 @@ public class Corp implements TribotScript {
         Npc core = coreOpt.get();
         darkCoreLastSeen = System.currentTimeMillis();
 
-        // PRIORITY 2: have a kill weapon ready. Elder maul preferred, DWH fallback.
+        // 1.9.60: keep Fang+defender equipped UNLESS the core is on us
+        // or about to land. User: 'we should keep the fang and defender
+        // out until the core actually lands on us or is focusing us.
+        // otherwise we just end up afking hitting the corp with our 2h
+        // weapon.' Pre-1.9.60 we equipped the maul as soon as the core
+        // was visible to ANYBODY, even when it was clearly chasing a
+        // teammate — and during that window the bot DPS'd Corp with the
+        // slower 2H instead of Fang.
+        WorldTile myPos = MyPlayer.getTile();
+        if (myPos == null) return;
+        double dist = myPos.distanceTo(core.getTile());
+        final double CORE_PROXIMITY_THRESHOLD = 2.5; // close enough that it's likely landing on us next tick
+        boolean coreOnOrApproaching = dist <= CORE_PROXIMITY_THRESHOLD;
+
+        if (!coreOnOrApproaching) {
+            // Core is far / on a teammate — keep Fang on for Corp DPS.
+            // If we accidentally have the maul equipped from a previous
+            // tick, swap back to Fang.
+            if (isCoreKillWeaponEquipped() && !specWeaponSwitchQueued) {
+                Log.info("Dark core present but distant (dist=" + dist
+                        + ") - swapping back to Fang for Corp DPS");
+                queueSpecWeaponSwitchBack();
+            }
+            return;
+        }
+
+        // Core is on us / approaching — swap to maul for the jump kill.
         if (!isCoreKillWeaponEquipped()) {
             if (!equipCoreKillWeapon()) {
-                Log.warn("Dark core: no Elder maul / DWH available - falling back to legacy dodge");
+                Log.warn("Dark core close (dist=" + dist
+                        + ") but no Elder maul / DWH available - falling back to legacy dodge");
                 handleAdvancedDarkCoreLegacy();
                 return;
             }
             return; // gear swap costs a tick; reassess next tick.
         }
 
-        // PRIORITY 3: am I the bot the core landed on? Adjacency check.
-        // 1.9.44 follow-up: user clarified the lock should persist UNTIL
-        // THE CORE IS KILLED — don't release the maul just because a
-        // teammate happens to be closer for a tick. Keep maul equipped
-        // for the whole core lifetime; only the grace timer above gates
-        // the swap-back to Fang, which fires on core-killed (gone for
-        // > CORE_GRACE_MS).
-        WorldTile myPos = MyPlayer.getTile();
-        if (myPos == null) return;
-        double dist = myPos.distanceTo(core.getTile());
         if (dist > 1.5) {
-            Log.debug("Dark core present but not on me (dist=" + dist + ") - holding kill weapon");
+            Log.debug("Dark core close (dist=" + dist + ") - kill weapon ready");
             return;
         }
 
@@ -4998,9 +5015,26 @@ public class Corp implements TribotScript {
      *  Rune pouch (or Divine variant, contents not introspectable without
      *  opening it) or all loose runes in inventory. */
     private boolean hasVengeanceRunes() {
-        if (Inventory.contains(RUNE_POUCH) || Inventory.contains(DIVINE_RUNE_POUCH)) {
-            return true;
+        // 1.9.60: match ANY item whose name contains "rune pouch" (case
+        // insensitive) — covers "Rune pouch", "Divine rune pouch", and
+        // variants like "Rune pouch (l)" or coloured/upgraded pouches.
+        // Pre-1.9.60 we matched only the exact strings "Rune pouch" and
+        // "Divine rune pouch" via Inventory.contains, so any variant
+        // failed the check. User: 'we have a rune pouch with the current
+        // runes, we should be trying to cast it.'
+        boolean hasPouch;
+        try {
+            hasPouch = Query.inventory()
+                    .filter(item -> {
+                        String n = item.getName();
+                        return n != null && n.toLowerCase().contains("rune pouch");
+                    })
+                    .findFirst()
+                    .isPresent();
+        } catch (Exception e) {
+            hasPouch = false;
         }
+        if (hasPouch) return true;
         return Inventory.contains("Astral rune")
                 && Inventory.contains("Death rune")
                 && Inventory.contains("Earth rune");
@@ -7265,7 +7299,11 @@ public class Corp implements TribotScript {
         for (String d : DEFENDER_PRIORITY) singles.put(d, 1);
         for (int dose = 8; dose >= 1; dose -= 2) singles.put("Ring of dueling(" + dose + ")", 1);
         for (int dose = 8; dose >= 1; dose -= 2) singles.put("Games necklace(" + dose + ")", 1);
-        singles.put("Teleport to house", 1);
+        // 1.9.60: do NOT cap "Teleport to house" tabs — user does multiple
+        // POH cycles per kill and needs the stack to survive. User:
+        // 'when we bank we put away all our house tabs except one. thats
+        // unintended. we need multiple.' Cape variants stay capped at 1
+        // (only one can be equipped at a time anyway).
         singles.put("Construct. cape", 1);
         singles.put("Construct. cape(t)", 1);
 
