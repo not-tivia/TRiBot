@@ -6131,15 +6131,12 @@ public class Corp implements TribotScript {
 
 		Npc corp = corpOpt.get();
 
-		if (!isCorpHealthAboveSpecThreshold(corp)) {
-			Log.info("Corp health too low for special attack, switching to normal weapon");
-			if (specWeaponReadyForUse) {
-				queueSpecWeaponSwitchBack();
-				specWeaponReadyForUse = false;
-			}
-			currentState = BotState.FIGHTING_CORP;
-			return;
-		}
+		// 1.9.30: dropped the Corp-HP gate here too. The phase-target gate
+		// (shouldSpecNowConsideringTeam, run below) is the right place to
+		// decide whether to keep specing — when phase targets are done,
+		// it skips and we fall through to Fang. The HP threshold was
+		// gating phase-1 specs even when phase 1 wasn't complete, leaving
+		// Corp's defense un-reduced and the melee finish much slower.
 
 		// Phase D: rotate to the right spec weapon for the team's current phase.
 		// 1.9.8: dropped the settings.coordinatorEnabled gate (mirrors the
@@ -7592,14 +7589,16 @@ public class Corp implements TribotScript {
         if (Combat.getSpecialAttackPercent() < getMinSpecEnergy() || !isPlayerInCombat()) {
             return false;
         }
-
-        // Check if Corp health is above threshold
+        // 1.9.30: dropped the Corp-HP gate from this check. User report:
+        // bot wouldn't fire its 4th Elder maul spec because Corp HP was
+        // already below 1700, even though phase 1 (4 phase-1 specs)
+        // wasn't done yet. Stat-reducing specs are valuable for the
+        // melee finish regardless of Corp's current HP — the right
+        // gate is "phase target met", which shouldSpecNowConsideringTeam
+        // checks inside handleSpecialAttack. Spec firing here just needs
+        // energy + in-combat + Corp present.
         Optional<Npc> corpOpt = Query.npcs().nameEquals(CORPOREAL_BEAST).findFirst();
-        if (corpOpt.isPresent()) {
-            return isCorpHealthAboveSpecThreshold(corpOpt.get());
-        }
-
-        return false;
+        return corpOpt.isPresent();
     }
 
     /**
