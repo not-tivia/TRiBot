@@ -5844,18 +5844,18 @@ public class Corp implements TribotScript {
             return;
         }
 
-        // 1.9.4: HP guard. equipMainWeaponFast blocks the thread for the
-        // duration of two inventory clicks + verification (~1-2 seconds).
-        // If the bot is at critical HP, that's a death sentence —
-        // production log showed the bot eating Shark and starting the
-        // swap, then dying mid-swap because Corp kept hitting through
-        // the animation lock. Postpone the swap until HP recovers above
-        // the combo-eat threshold. The handler will be re-checked next
-        // tick.
+        // 1.9.4 / 1.9.26: HP guard. Pre-1.9.26 postponed the swap whenever
+        // HP <= INTERNAL_COMBO_EAT_HP (50). That was correct for swapping
+        // INTO a 2H spec weapon (slow animation lock) but counterproductive
+        // for swapping BACK to Fang at kill phase — Corp keeps hitting,
+        // HP never recovers, bot stays stuck on Arclight ("poking") and
+        // dies. The swap-back to a 1H + defender is fast (~1 game tick)
+        // and gets us higher DPS / accuracy, which actually helps survive.
+        // Only postpone when HP is critical (emergency threshold = 15).
         int currentHp = MyPlayer.getCurrentHealth();
-        if (currentHp <= INTERNAL_COMBO_EAT_HP) {
+        if (currentHp <= INTERNAL_EMERGENCY_HP) {
             Log.debug("Postponing spec-weapon switch-back: HP " + currentHp +
-                    " <= " + INTERNAL_COMBO_EAT_HP + " (eat first)");
+                    " <= " + INTERNAL_EMERGENCY_HP + " (emergency, eat first)");
             return;
         }
 
