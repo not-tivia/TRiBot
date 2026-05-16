@@ -1810,15 +1810,16 @@ public class Corp implements TribotScript {
      *  "Other". HTML color tags are stripped before comparison. */
     private boolean isVengeanceSelfWidget(Widget w) {
         if (w == null) return false;
-        if (!w.getActions().contains("Cast")) return false;
-        // 1.9.14 / 1.9.15.1: identify Vengeance Self by NAME, not fixed
-        // widget path. Pre-1.9.14 we trusted indexPath[1] == 142 to be
-        // Vengeance Self, but the widget tree shifts between game versions
-        // and on this user's client [218, 142] is Ice Plateau Teleport.
-        // Widget.getName() returns Optional<String> directly (not String);
-        // Widget.getComponentName() doesn't exist on this SDK build. So
-        // we sample getName() + getText() and require "vengeance" in
-        // at least one. "other" excluded to skip Vengeance Other.
+        // 1.9.65: dropped the 'getActions().contains("Cast")' requirement.
+        // User: 'we also still are not casting vengence correctly our
+        // original version just checked for the texture or something
+        // like that i think.' The Cast-action filter is fragile — on
+        // some game variants the right-click action set differs or
+        // doesn't include "Cast" until the icon is hovered. Just
+        // matching the spell NAME is enough; click("Cast") on a widget
+        // without that action will silently fall back to a left-click,
+        // and clicking the Vengeance Self icon by left-click also
+        // casts the spell.
         String combined = "";
         try { combined += " " + w.getName().orElse(""); } catch (Throwable ignored) {}
         combined += " " + w.getText().orElse("");
@@ -1833,20 +1834,32 @@ public class Corp implements TribotScript {
         GameTab.MAGIC.open();
         Waiting.waitUntil(2000, () -> GameTab.MAGIC.isOpen());
 
-        // 1.9.14: search all widgets in the spellbook root by NAME, not by
-        // fixed path. childIndex parameter is retained but no longer used
-        // as a filter — kept for log-only context.
+        // 1.9.65: dropped the isVisible() filter — same root cause as the
+        // 1.9.55 dialog-readiness fix. Spellbook icons can return false
+        // for isVisible() depending on render state but still be
+        // clickable. Just match by widget name (covered in
+        // isVengeanceSelfWidget); try Cast action first, fall back to
+        // a plain click.
         Optional<Widget> vengeanceWidget = Query.widgets()
                 .inRoots(218)
                 .filter(this::isVengeanceSelfWidget)
-                .isVisible()
                 .findFirst();
 
         if (vengeanceWidget.isPresent()) {
-            int[] path = vengeanceWidget.get().getIndexPath();
+            Widget w = vengeanceWidget.get();
+            int[] path = w.getIndexPath();
             Log.info("Clicking Vengeance widget at path " + java.util.Arrays.toString(path));
-            vengeanceWidget.get().click("Cast");
-            Waiting.waitUntil(3000, () -> !MyPlayer.isAnimating());
+            boolean clicked = false;
+            try { clicked = w.click("Cast"); } catch (Throwable ignored) {}
+            if (!clicked) {
+                Log.info("Cast action not available — falling back to plain click");
+                try { clicked = w.click(); } catch (Throwable ignored) {}
+            }
+            if (clicked) {
+                Waiting.waitUntil(3000, () -> !MyPlayer.isAnimating());
+            } else {
+                Log.warn("Vengeance widget click failed (both Cast and plain)");
+            }
         } else {
             Log.warn("Vengeance widget not found (searched root 218 by name)");
         }
