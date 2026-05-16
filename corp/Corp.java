@@ -9027,20 +9027,24 @@ public class Corp implements TribotScript {
 					+ "found anywhere under root 162)");
 			return false;
 		}
-		// 1.9.47: dialog parent is up, but the CLICKABLE children take
-		// 1-3 more ticks to populate their bounding rects. User hypothesis
-		// confirmed: 'maybe we are starting the search for the interface
-		// before its actually opened? that would make sense.' Pre-1.9.47
-		// we waited a flat 700ms settle then proceeded; sometimes the
-		// shortcut widget click landed before its bounds existed and
-		// missed (returned true but no game action). Now: poll for the
-		// shortcut OR the input widget to be readable, up to 3s. Once
-		// either appears the dialog's child tree has finished rendering.
+		// 1.9.55: require the SHORTCUT widget to be ready (or input to be
+		// empty == fresh dialog ready for typing). Pre-1.9.55 we accepted
+		// 'shortcut OR input populated' — but the input renders 1-3 ticks
+		// BEFORE the shortcut, so we kept entering handleFriendNameDialog
+		// while the shortcut was still loading. The input-correct branch
+		// then saw no shortcut, fell back to Enter, Enter no-op'd, 5s
+		// timeout, retry. User: 'Do we have a timeout reversed here or
+		// something' — yes, the readiness gate was admitting too early.
 		final String hostForReady = getEffectiveFriendName();
 		boolean readyForAction = Waiting.waitUntil(3000, () -> {
 			try {
 				if (findFriendHouseShortcutByText(hostForReady).isPresent()) return true;
-				return !readFriendHouseInputText().isEmpty();
+				// No shortcut yet. If input is empty, dialog is fresh and
+				// we'll type — proceed without waiting on the shortcut.
+				// If input has text but shortcut is missing, KEEP WAITING
+				// — that's the bad state that produced double-types and
+				// failed-Enter retries.
+				return readFriendHouseInputText().isEmpty();
 			} catch (Exception e) {
 				return false;
 			}
