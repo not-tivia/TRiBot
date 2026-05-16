@@ -21,6 +21,32 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.6 (2026-05-16) - Three fixes after the user's 1.9.5 test:
+ *                        (a) In-line spec detector swapped to Fang when
+ *                            shouldStartRestorationCycle returned false at
+ *                            the bar boundary, but the same check passed
+ *                            6 seconds later in the mid-fight handler —
+ *                            bot wasted a Fang-swap that immediately got
+ *                            un-done by the POH tele. Dropped the Corp-
+ *                            HP-above-floor gate from shouldStartRestorationCycle.
+ *                            The HP gate is for SPEC-FIRE decisions (don't
+ *                            waste a spec on a near-dead Corp); the tele
+ *                            decision should be "always tele if we want
+ *                            more specs". After POH, if Corp HP is below
+ *                            floor we fall through to kill-phase melee via
+ *                            existing spec-fire gates.
+ *                        (b) isInFriendHouse() only checked for one
+ *                            specific pool object. The friend's house has
+ *                            both a portal (also in entry lobby) and POH
+ *                            furniture; if the pool wasn't loaded in render
+ *                            yet OR was a different tier, the bot would
+ *                            re-click the portal endlessly. Now matches
+ *                            any pool / jewellery box / spirit tree.
+ *                        (c) Per-kill reset (in handleLooting) now also
+ *                            clears the queued spec-weapon switch-back —
+ *                            previously a queue scheduled mid-bar could
+ *                            survive into the next kill's prep and fire at
+ *                            the wrong moment.
  *   1.9.5 (2026-05-16) - Phase rotation now happens mid-bar. The full Corp
  *                        meta is Phase 1 → Phase 2 → Phase 3:
  *                          Phase 1 (defense reducers): 4 Elder maul / DWH
@@ -5587,11 +5613,15 @@ public class Corp implements TribotScript {
 
         // 1.8.8: restoration tracking is PER-KILL. Each new Corp kill starts
         // fresh — full POH cycle budget, zero specs counted, zero phase
-        // contribution attributed to this account. The pre-1.8.8 model was
-        // per-TRIP, which meant a single bank trip's restoration cycles got
-        // distributed across N kills; user wants every kill to be able to
-        // dump a full multi-cycle spec rotation.
+        // contribution attributed to this account.
+        // 1.9.6: also clear queued spec-weapon switch-back. If the kill
+        // ended while a switch-back was queued (e.g. Corp died mid-bar),
+        // the queue would survive into next kill's prep and fire at the
+        // wrong moment. Clear it here at the same per-kill boundary.
         resetRestorationTracking();
+        specWeaponSwitchQueued = false;
+        specWeaponSwitchTime = 0;
+        needsToSwitchBackFromSpec = false;
 
         // IMPORTANT: Try to keep at least one team member in the room to prevent Corp roaming
         // Check if other teammates are staying or if we should stay
@@ -6002,18 +6032,16 @@ public class Corp implements TribotScript {
 		//       it; spec dumping is pointless past this point — go melee).
 		boolean specDepleted = Combat.getSpecialAttackPercent() < getMinSpecEnergy();
 		boolean phaseTargetsNotMet = teamPhaseNeeded() > 0;
-		// When Corp's health bar isn't visible, no one is attacking Corp yet,
-		// so it's at full HP — assume above floor. The visible-bar check
-		// inside isCorpHealthAboveSpecThreshold returns false in that case,
-		// which would wrongly block pre-engagement restoration.
-		boolean corpHealthAboveFloor;
-		if (!corpPresent) {
-			corpHealthAboveFloor = false;
-		} else {
-			Npc corp = corpOpt.get();
-			corpHealthAboveFloor = !corp.isHealthBarVisible()
-					|| isCorpHealthAboveSpecThreshold(corp);
-		}
+		// 1.9.6: dropped corpHealthAboveFloor from this gate. The Corp-HP
+		// gate is a SPEC-FIRE decision (don't waste a spec on a near-dead
+		// Corp) — corpMinHpForSpec / isCorpHealthAboveSpecThreshold still
+		// guards spec firing in shouldSpecNowConsideringTeam. But for the
+		// tele-to-POH decision, the user wants ALWAYS-TELE after bar
+		// exhaust as long as more specs are wanted. Production log showed
+		// the gate failing in the in-line detector at one moment then
+		// passing 6 sec later in the mid-fight check — bot wasted a Fang
+		// swap in between. After POH, if Corp HP is below floor we'll
+		// fall through to kill-phase melee instead of spec-firing again.
 		boolean safetyCap = currentRestorationCycle < settings.totalRestorationCycles;
 		boolean hasHouseTabs = hasHouseTeleportTab();
 
@@ -6025,7 +6053,6 @@ public class Corp implements TribotScript {
 		return corpPresent
 				&& specDepleted
 				&& phaseTargetsNotMet
-				&& corpHealthAboveFloor
 				&& safetyCap
 				&& !isInRestorationPhase;
 	}
@@ -7808,9 +7835,20 @@ public class Corp implements TribotScript {
 	 * Check if we're in friend's house (simplified)
 	 */
 	private boolean isInFriendHouse() {
-		String poolName = settings.poolName == null || settings.poolName.trim().isEmpty()
-				? "Ornate rejuvenation pool" : settings.poolName.trim();
-		return Query.gameObjects().nameEquals(poolName).findFirst().isPresent();
+		// 1.9.6: detect POH furniture broadly, not just one specific pool.
+		// Pre-1.9.6 the check looked only for the configured pool name. If
+		// the pool wasn't loaded in render yet (entry delay), or the friend
+		// had a different pool tier, the check failed and the bot kept
+		// re-clicking the friend's-house portal forever.
+		// A finished POH always has a pool OR a jewellery box at minimum,
+		// and neither exists in the entry lobby (which only has a portal).
+		// nameContains is used because pool/box tiers all share these
+		// suffixes — Basic/Fancy/Ornate/Rejuvenation/Restoration/etc.
+		return Query.gameObjects().nameContains("rejuvenation pool").findFirst().isPresent()
+				|| Query.gameObjects().nameContains("restoration pool").findFirst().isPresent()
+				|| Query.gameObjects().nameContains("revitalisation pool").findFirst().isPresent()
+				|| Query.gameObjects().nameContains("jewellery box").findFirst().isPresent()
+				|| Query.gameObjects().nameContains("Spirit tree").findFirst().isPresent();
 	}
 
 
