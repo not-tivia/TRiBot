@@ -1326,6 +1326,16 @@ public class Corp implements TribotScript {
     private long specWeaponSwitchTime = 0;
     private boolean needsToSwitchBackFromSpec = false;
     private boolean specWeaponReadyForUse = false; // NEW: Track if spec weapon is ready
+    // 1.9.34: debounce timestamp for spec-button activation. Combat.activateSpecialAttack()
+    // is a CLICK on the spec button; if the button is already ON, clicking
+    // it TURNS IT OFF. Multiple sites in the code call activate-with-guard,
+    // but the guard (isSpecialAttackEnabled) returns stale data right after
+    // a click. So 4 sites firing back-to-back in 2 seconds can produce an
+    // unpredictable final state. Use this timestamp to skip activation if
+    // we clicked recently — trust the prior click instead.
+    private long lastSpecActivateAt = 0;
+    private static final long SPEC_ACTIVATE_DEBOUNCE_MS = 1200;
+
     // 1.9.2: tracks the spec-energy value at the most recent pre-activation.
     // The in-line spec detector now fires only when the current energy is
     // LOWER than this value — i.e. a real spec has consumed energy. Pre-1.9.2
@@ -3027,7 +3037,7 @@ public class Corp implements TribotScript {
 
             if (canFireAnotherSpecOnThisBar()) {
                 Log.info("Energy + phase targets allow another spec — re-activating spec for next hit");
-                if (Combat.activateSpecialAttack()) {
+                if (tryActivateSpec()) { // 1.9.34
                     specWeaponReadyForUse = true;
                     // Re-arm tracking so the NEXT spec fire is detected as a real drop.
                     lastSeenSpecEnergy = Combat.getSpecialAttackPercent();
@@ -3055,7 +3065,7 @@ public class Corp implements TribotScript {
         // 🔥 PRE-ACTIVATE SPECIAL ATTACK IF CONDITIONS MET
 		if (shouldUseSpecialAttack() && !Combat.isSpecialAttackEnabled()) {
 			Log.info("Special attack conditions met - PRE-ACTIVATING for next attack");
-			if (Combat.activateSpecialAttack()) {
+			if (tryActivateSpec()) { // 1.9.34
 				lastSeenSpecEnergy = Combat.getSpecialAttackPercent(); xpAtSpec = getMeleeCombatXp(); // 1.9.2 + 1.9.9: seed detector floor
 				Log.info("Special attack pre-activated in main combat loop");
 			}
@@ -6211,13 +6221,12 @@ public class Corp implements TribotScript {
 			}
 		}
 
-		if (!Combat.isSpecialAttackEnabled()) {
-			Log.warn("Special attack not enabled - activating now as backup");
-			if (!Combat.activateSpecialAttack()) {
-				Log.error("Failed to activate special attack as backup");
-				currentState = BotState.FIGHTING_CORP;
-				return;
-			}
+		// 1.9.34: use the debounced activator. If we activated within the
+		// debounce window, trust the prior click — don't re-toggle.
+		if (!tryActivateSpec()) {
+			Log.error("Failed to activate special attack as backup");
+			currentState = BotState.FIGHTING_CORP;
+			return;
 		}
 
 		// 🔥 ENERGY-BASED SPECIAL ATTACK EXECUTION
@@ -7049,7 +7058,7 @@ public class Corp implements TribotScript {
 		specWeaponReadyForUse = true;
 		if (!Combat.isSpecialAttackEnabled()) {
 			Log.info("Lobby prep: PRE-ACTIVATING special attack — first Corp hit will spec");
-			if (Combat.activateSpecialAttack()) {
+			if (tryActivateSpec()) { // 1.9.34
 				// 1.9.2 + 1.9.9: seed the detector's energy floor and the XP
 				// baseline so the first Corp hit is recognized as a real spec
 				// fire AND its XP delta confirms hit/miss.
@@ -7146,7 +7155,7 @@ public class Corp implements TribotScript {
 					// Pre-activate special attack
 					if (!Combat.isSpecialAttackEnabled()) {
 						Log.info("PRE-ACTIVATING special attack now that spec weapon is equipped");
-						if (Combat.activateSpecialAttack()) {
+						if (tryActivateSpec()) { // 1.9.34
 							lastSeenSpecEnergy = Combat.getSpecialAttackPercent(); xpAtSpec = getMeleeCombatXp(); // 1.9.2 + 1.9.9
 							Log.info("Special attack pre-activated successfully!");
 						} else {
@@ -7163,7 +7172,7 @@ public class Corp implements TribotScript {
 				// Pre-activate if not already active
 				if (!Combat.isSpecialAttackEnabled()) {
 					Log.info("PRE-ACTIVATING special attack - weapon ready");
-					if (Combat.activateSpecialAttack()) {
+					if (tryActivateSpec()) { // 1.9.34
 						lastSeenSpecEnergy = Combat.getSpecialAttackPercent(); xpAtSpec = getMeleeCombatXp(); // 1.9.2 + 1.9.9
 						Log.info("Special attack pre-activated successfully!");
 					}
@@ -7818,6 +7827,32 @@ public class Corp implements TribotScript {
         }
     }
 
+    /** 1.9.34: debounced spec-button activation. Skips the click if we
+     *  activated within the last SPEC_ACTIVATE_DEBOUNCE_MS — the previous
+     *  click may not have propagated to isSpecialAttackEnabled yet, and a
+     *  fresh click on an already-ON button TOGGLES IT OFF.
+     *  Returns true if we either activated successfully OR believe the
+     *  spec is already on (recent activate). False only if activate failed
+     *  AND no recent activate.
+     */
+    private boolean tryActivateSpec() {
+        long now = System.currentTimeMillis();
+        if (now - lastSpecActivateAt < SPEC_ACTIVATE_DEBOUNCE_MS) {
+            // Recent activate — trust it, don't click again.
+            return true;
+        }
+        if (Combat.isSpecialAttackEnabled()) {
+            // Already on per the SDK; don't click, just record we trust it.
+            lastSpecActivateAt = now;
+            return true;
+        }
+        if (tryActivateSpec()) { // 1.9.34
+            lastSpecActivateAt = now;
+            return true;
+        }
+        return false;
+    }
+
     /** 1.9.0 / 1.9.1: can we fire another spec on the current bar?
      *  1.9.0 originally gated this on phase targets + Corp HP floor, but
      *  those gates belong at the BAR boundary (shouldStartRestorationCycle
@@ -8092,15 +8127,12 @@ public class Corp implements TribotScript {
 				return;
 			}
 
-			if (!Combat.isSpecialAttackEnabled()) {
-				Log.info("PRE-ACTIVATING special attack for POH restoration cycle");
-				Combat.activateSpecialAttack();
-			}
+			// 1.9.34: debounced activator — avoid rapid toggles.
+			Log.info("PRE-ACTIVATING special attack for POH restoration cycle");
+			tryActivateSpec();
 		} else {
-			if (!Combat.isSpecialAttackEnabled()) {
-				Log.info("PRE-ACTIVATING special attack for POH cycle");
-				Combat.activateSpecialAttack();
-			}
+			Log.info("PRE-ACTIVATING special attack for POH cycle");
+			tryActivateSpec();
 		}
 
 		// 🔥 USE ENERGY-BASED CONFIRMATION
@@ -8452,7 +8484,7 @@ public class Corp implements TribotScript {
 
 	private boolean useSpecialAttackOnCorp(Npc corp) {
 		try {
-			if (!Combat.activateSpecialAttack()) {
+			if (!tryActivateSpec()) { // 1.9.34: debounced
 				Log.warn("Failed to activate special attack");
 				return false;
 			}
