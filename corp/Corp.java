@@ -21,6 +21,18 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.1 (2026-05-16) - Fix mid-bar spec bail. 1.9.0 added multi-spec-per-bar
+ *                        but the canFireAnotherSpecOnThisBar gate also
+ *                        checked Corp HP floor + phase targets. In a real
+ *                        team kill, Corp's HP can drop below 1700 between
+ *                        the bot's first spec firing and the gate's
+ *                        post-spec evaluation — wrongly cancelling spec #2
+ *                        on a bar already committed to. Those gates belong
+ *                        at the BAR boundary (shouldStartRestorationCycle
+ *                        before the next bar), not mid-bar. Once we commit
+ *                        to a bar, drain it. canFireAnotherSpec now only
+ *                        checks energy + Corp alive, and logs the result
+ *                        so we can diagnose if it ever bails unexpectedly.
  *   1.9.0 (2026-05-16) - Three fixes from a 1.8.9 production log:
  *                        (a) Multi-spec per bar. The in-line spec detector
  *                            unconditionally queued switch-back-to-main after
@@ -6763,20 +6775,32 @@ public class Corp implements TribotScript {
         ownedSpecWeaponsCache = null;
     }
 
-    /** 1.9.0: true when we have enough energy + phase headroom for another
-     *  spec on the current bar. Used by the in-line spec detector to decide
-     *  whether to re-activate spec or switch back to main weapon. Mirrors
-     *  the conditions in shouldStartRestorationCycle minus the spec-depleted
-     *  gate — we're asking "can we keep going" not "should we restore". */
+    /** 1.9.0 / 1.9.1: can we fire another spec on the current bar?
+     *  1.9.0 originally gated this on phase targets + Corp HP floor, but
+     *  those gates belong at the BAR boundary (shouldStartRestorationCycle
+     *  before the next bar), not mid-bar. When the team kills fast, Corp's
+     *  HP drops below 1700 between our pre-activation and the in-line spec
+     *  fire — which would wrongly cancel the second spec on a bar we'd
+     *  already committed to. Once a spec bar starts, drain it to empty.
+     *  Only checks: enough energy for one more spec AND Corp is alive. */
     private boolean canFireAnotherSpecOnThisBar() {
-        if (Combat.getSpecialAttackPercent() < getMinSpecEnergy()) return false;
-        if (teamPhaseNeeded() == 0) return false;
+        int energy = Combat.getSpecialAttackPercent();
+        int minEnergy = getMinSpecEnergy();
+        if (energy < minEnergy) {
+            Log.info("canFireAnotherSpec: NO — energy " + energy + " < min " + minEnergy);
+            return false;
+        }
         Optional<Npc> corpOpt = Query.npcs().nameEquals(CORPOREAL_BEAST).findFirst();
-        if (!corpOpt.isPresent()) return false;
-        Npc corp = corpOpt.get();
-        // If health bar isn't visible (just engaged, not yet hit), assume full
-        // HP — same logic as the restoration gate.
-        return !corp.isHealthBarVisible() || isCorpHealthAboveSpecThreshold(corp);
+        if (!corpOpt.isPresent()) {
+            Log.info("canFireAnotherSpec: NO — Corp not visible");
+            return false;
+        }
+        if (!isCorpAlive(corpOpt.get())) {
+            Log.info("canFireAnotherSpec: NO — Corp not alive");
+            return false;
+        }
+        Log.info("canFireAnotherSpec: YES — energy " + energy + " >= " + minEnergy);
+        return true;
     }
 
     /** How many specs we can fire from a full bar with the cheapest owned
