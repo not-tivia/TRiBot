@@ -7918,6 +7918,24 @@ public class Corp implements TribotScript {
 
     // Update the food handling in main loop
     private void handleHealthAndPrayer() {
+        // 1.9.62: skip eating/prayer when we're en-route to the restoration
+        // pool. Pool drink restores HP and prayer to FULL — eating right
+        // before it is wasted food. User: 'i just noticed that sometimes
+        // when spec dumping the boss even though we are going to the
+        // house to restore stats we will eat before entering the house.'
+        // Combat states (FIGHTING_CORP / USING_SPECIAL_ATTACK / USING_INITIAL_SPECS)
+        // still eat because Corp is hitting us during spec dump; once we
+        // tele out (TELEPORTING_TO_HOUSE+) there's no further damage and
+        // the next pool drink will top us off anyway.
+        if (currentState == BotState.TELEPORTING_TO_HOUSE
+                || currentState == BotState.ENTERING_FRIEND_HOUSE
+                || currentState == BotState.USING_ORNATE_POOL
+                || currentState == BotState.TELEPORTING_BACK_TO_CORP
+                || currentState == BotState.BANKING_AND_HEALING
+                || currentState == BotState.W330_RESTORATION) {
+            return;
+        }
+
         int currentHealth = MyPlayer.getCurrentHealth();
 
         // 1.8.9: combo eat (Shark + Karambwan, 38 HP) whenever HP is below 50.
