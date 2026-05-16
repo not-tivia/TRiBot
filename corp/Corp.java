@@ -21,6 +21,32 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.8.7 (2026-05-15) - Spec rotation finally works when joining an in-progress
+ *                        teammate kill. Three coupled bugs in the entering-
+ *                        combat path:
+ *                        (a) handleEnteringCombat "Joining existing combat"
+ *                            branch only set state=FIGHTING_CORP without
+ *                            ever calling corp.interact("Attack") — the bot
+ *                            stood there while the pre-activated spec sat
+ *                            queued. The branch is gone; we always attack
+ *                            now and just log differently based on whether
+ *                            Corp was already in combat.
+ *                        (b) When the pre-activated spec eventually fired
+ *                            (via the FIGHTING_CORP tail re-engage on the
+ *                            next eat), it consumed energy outside the
+ *                            USING_SPECIAL_ATTACK state, so queueSpecWeaponSwitchBack
+ *                            never ran — bot stayed on Elder maul the rest of
+ *                            the kill. New detector at the top of handleFightingCorp
+ *                            notices: specWeaponReadyForUse=true +
+ *                            !Combat.isSpecialAttackEnabled() + spec weapon
+ *                            equipped + spec% < 100 → records the spec for
+ *                            team phase tracking and queues switch back to Fang.
+ *                        (c) corpMinHpForSpec default 1200 was the historical
+ *                            value before 1.7.3 actually wired the gate. With
+ *                            the gate enforced, a 1200 floor blocks Phase 2/3
+ *                            specs once the team drops Corp past 60%. Lowered
+ *                            default to 600 — keeps "don't spec a near-dead
+ *                            Corp" intent while letting team rotations finish.
  *   1.8.6 (2026-05-15) - Two more bugs surfaced in production: Ferox-tele loop
  *                        and spec-weapon stuck-on after the first spec.
  *                        - isAtFeroxEnclave: tile-coord check is now primary
@@ -1852,17 +1878,21 @@ public class Corp implements TribotScript {
             Log.info("Preparing spec weapon - Corp is visible and positioned");
             prepareSpecWeaponForCorp(corp);
 
-            // Start combat
-            if (!isNpcInCombat(corp)) {
-                if (corp.interact("Attack")) {
-                    if (Waiting.waitUntil(5000, () -> isPlayerInCombat())) {
-                        Log.info("Combat initiated successfully");
-                        currentState = BotState.FIGHTING_CORP;
-                    }
+            // Start combat. Even if Corp is already engaged with a teammate
+            // (isNpcInCombat==true), OUR bot still needs to issue an Attack
+            // so it actually does damage and triggers the pre-activated spec.
+            // The pre-1.8.7 "joining" branch just set state without attacking,
+            // leaving the bot standing while the spec sat queued.
+            if (corp.interact("Attack")) {
+                if (Waiting.waitUntil(5000, () -> isPlayerInCombat())) {
+                    Log.info(isNpcInCombat(corp) ? "Joined existing combat" : "Combat initiated successfully");
+                    currentState = BotState.FIGHTING_CORP;
+                } else {
+                    Log.warn("Attack registered but isPlayerInCombat timed out — proceeding to FIGHTING_CORP anyway");
+                    currentState = BotState.FIGHTING_CORP;
                 }
             } else {
-                Log.info("Joining existing combat");
-                currentState = BotState.FIGHTING_CORP;
+                Log.warn("corp.interact('Attack') failed during ENTERING_COMBAT");
             }
         } else {
             // Corp not visible - use improved movement toward deep area
@@ -2118,6 +2148,24 @@ public class Corp implements TribotScript {
         }
 
         handleProtectionPrayers();
+
+        // 1.8.7: detect a pre-activated spec that just fired in-line.
+        // prepareSpecWeaponForCorp pre-activates spec before the bot
+        // enters combat. The first attack consumes that spec, but it
+        // happens outside the USING_SPECIAL_ATTACK state so the normal
+        // switch-back path never runs. Notice the energy drop + spec
+        // button now off + we have the spec weapon equipped → queue
+        // the switch-back so we don't stay on the spec weapon all kill.
+        if (specWeaponReadyForUse
+                && !Combat.isSpecialAttackEnabled()
+                && isSpecWeaponEquipped()
+                && Combat.getSpecialAttackPercent() < 100) {
+            Log.info("Pre-activated spec fired in-line — queueing switch back to main");
+            // Record the spec we used so the team-phase aggregator advances.
+            if (chosenSpecWeapon != null) recordSpecUsed(chosenSpecWeapon);
+            specWeaponReadyForUse = false;
+            queueSpecWeaponSwitchBack();
+        }
 
         // 🔥 PRE-ACTIVATE SPECIAL ATTACK IF CONDITIONS MET
 		if (shouldUseSpecialAttack() && !Combat.isSpecialAttackEnabled()) {
@@ -7346,7 +7394,11 @@ public class Corp implements TribotScript {
 
         // Spec
         public int minSpecEnergy = 50;
-        public int corpMinHpForSpec = 1200;
+        // Lowered from 1200 (1.8.7): the gate is now actually enforced
+        // (1.7.3 fix), and a 1200 floor blocks Phase 2/3 specs on a team
+        // that drops Corp fast. 600 keeps the "don't spec a near-dead Corp"
+        // intent while letting team rotations actually finish.
+        public int corpMinHpForSpec = 600;
 
         // Dark core strategy (Phase G).
         // false = modern attack-and-step (Elder maul / DWH burst, kill core mid-air).
