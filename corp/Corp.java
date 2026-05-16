@@ -6679,7 +6679,14 @@ public class Corp implements TribotScript {
 		// passing 6 sec later in the mid-fight check — bot wasted a Fang
 		// swap in between. After POH, if Corp HP is below floor we'll
 		// fall through to kill-phase melee instead of spec-firing again.
-		boolean safetyCap = currentRestorationCycle < settings.totalRestorationCycles;
+		// 1.9.25: dropped the safetyCap (currentRestorationCycle <
+		// settings.totalRestorationCycles). Old profiles have
+		// totalRestorationCycles=3 which capped restorations at 3/kill —
+		// after 3 cycles in one kill, this gate flipped false and the
+		// detector fell to "Kill phase swap to Fang" even though phase
+		// targets (4 Elder maul + 20 Arclight + 200 BGS damage) weren't
+		// met. Bot stopped specing way too early. The real gates are
+		// phase targets + Corp HP floor + house tabs available.
 		boolean hasHouseTabs = hasHouseTeleportTab();
 
 		if (!hasHouseTabs) {
@@ -6690,7 +6697,6 @@ public class Corp implements TribotScript {
 		return corpPresent
 				&& specDepleted
 				&& phaseTargetsNotMet
-				&& safetyCap
 				&& !isInRestorationPhase;
 	}
 
