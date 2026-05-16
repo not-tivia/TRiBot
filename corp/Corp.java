@@ -1311,11 +1311,16 @@ public class Corp implements TribotScript {
     private long prayerDeactivationTime = 0;
     private boolean corpWasAliveLastCheck = false;
     // 1.9.24: explicit "we observed Corp HP at 0" flag. The transition
-    // to LOOTING only fires when this is true. Resets per-kill alongside
-    // other kill-tracking state. With coordinator + bot-only teams, a
-    // teammate-confirmed kill signal would also flip this; with real
-    // players we rely solely on observing the HP bar.
+    // to LOOTING only fires when this is true. Resets per-kill.
     private boolean corpSeenAtZeroHp = false;
+    // 1.9.28: track max Corp HP% observed this kill. The health bar reads
+    // 0% on a freshly-engaged Corp because the bar exists (isHealthBarVisible
+    // == true) but the percentage hasn't been populated server-side. Without
+    // this tracker, we'd transition straight from FIGHTING_CORP to LOOTING
+    // on the first tick of combat — wasting the kill. We only declare
+    // Corp "dead from HP 0" if we've previously seen HP > 5% (proof the
+    // bar was actually populated).
+    private double maxCorpHpPercentThisKill = 0.0;
     // Weapon switching tracking
     private boolean specWeaponSwitchQueued = false;
     private long specWeaponSwitchTime = 0;
@@ -3087,17 +3092,23 @@ public class Corp implements TribotScript {
                 corp.interact("Attack");
             }
 
-            // 1.9.24: only declare Corp dead when we explicitly observe
-            // HP at/near 0. Pre-1.9.24 we said "dead" when the health bar
-            // wasn't visible AND we weren't in combat — but the health
-            // bar can be invisible for a tick or two during transitions
-            // (e.g., right after a spec or core dodge) while Corp is
-            // very much alive. Bot was transitioning to LOOTING and
-            // wasting the kill. Require: bar visible AND % at/below 1.
-            if (corp.isHealthBarVisible() && corp.getHealthBarPercent() <= 1.0) {
-                Log.info("Corp HP observed at 0 — looking for loot");
-                corpSeenAtZeroHp = true;
-                currentState = BotState.LOOTING;
+            // 1.9.24 / 1.9.28: only declare Corp dead when we observe HP
+            // at 0 AFTER having previously seen HP > 5%. The SDK reports
+            // 0% on a freshly-engaged Corp because the bar exists but
+            // hasn't been populated yet — without the tracker, the bot
+            // transitions from FIGHTING_CORP straight to LOOTING on the
+            // first tick of combat and wastes the kill.
+            if (corp.isHealthBarVisible()) {
+                double currentHpPercent = corp.getHealthBarPercent();
+                if (currentHpPercent > maxCorpHpPercentThisKill) {
+                    maxCorpHpPercentThisKill = currentHpPercent;
+                }
+                if (currentHpPercent <= 1.0 && maxCorpHpPercentThisKill > 5.0) {
+                    Log.info("Corp HP observed at 0 (peak this kill: "
+                            + maxCorpHpPercentThisKill + "%) — looking for loot");
+                    corpSeenAtZeroHp = true;
+                    currentState = BotState.LOOTING;
+                }
             }
         } else {
             // 1.9.24: Corp NPC not in render — could be dead, could be
@@ -4923,6 +4934,17 @@ public class Corp implements TribotScript {
         Npc corp = corpOpt.get();
         if (!corp.isHealthBarVisible()) return false;
         double hpPercent = corp.getHealthBarPercent();
+        // 1.9.28: require we've previously seen Corp HP > 5% before
+        // trusting a low-HP reading. The bar reads 0% on a freshly-
+        // engaged Corp; without this guard, isInKillPhase returns true
+        // on the first tick of combat and the bot prematurely queues a
+        // Fang swap thinking Corp is dying.
+        if (hpPercent > maxCorpHpPercentThisKill) {
+            maxCorpHpPercentThisKill = hpPercent;
+        }
+        if (maxCorpHpPercentThisKill <= 5.0) {
+            return false; // bar not yet populated — don't trust the reading
+        }
         int approxHp = (int) ((hpPercent / 100.0) * 2000);
         return approxHp < settings.corpMinHpForSpec;
     }
@@ -6265,6 +6287,7 @@ public class Corp implements TribotScript {
         specWeaponSwitchTime = 0;
         needsToSwitchBackFromSpec = false;
         corpSeenAtZeroHp = false; // 1.9.24: reset per-kill kill-confirmed flag
+        maxCorpHpPercentThisKill = 0.0; // 1.9.28: reset HP-bar-populated tracker
 
         // IMPORTANT: Try to keep at least one team member in the room to prevent Corp roaming
         // Check if other teammates are staying or if we should stay
