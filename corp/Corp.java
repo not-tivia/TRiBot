@@ -21,6 +21,21 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.2 (2026-05-16) - Fix spec-button spam-click. The in-line spec detector
+ *                        triggered on "energy < 100" which is true continuously
+ *                        after spec #1 — every loop iteration fired the
+ *                        detector, called recordSpecUsed(), and toggled the
+ *                        spec button. Result: 30+ "Pre-activated spec fired"
+ *                        logs per kill while the energy bar stayed stuck at
+ *                        50%, only 2 real specs fired but phase counter
+ *                        inflated to 30+ (which then wrongly satisfied
+ *                        teamPhaseNeeded() and blocked the POH restoration
+ *                        tele). Now the detector triggers on real energy
+ *                        DROPS via a new lastSeenSpecEnergy field. The field
+ *                        is updated after every Combat.activateSpecialAttack
+ *                        success (lobby prep, in-room prep, mid-fight pre-
+ *                        activate, mid-bar re-activate) so each "fire"
+ *                        corresponds to actual energy consumption.
  *   1.9.1 (2026-05-16) - Fix mid-bar spec bail. 1.9.0 added multi-spec-per-bar
  *                        but the canFireAnotherSpecOnThisBar gate also
  *                        checked Corp HP floor + phase targets. In a real
@@ -800,6 +815,14 @@ public class Corp implements TribotScript {
     private long specWeaponSwitchTime = 0;
     private boolean needsToSwitchBackFromSpec = false;
     private boolean specWeaponReadyForUse = false; // NEW: Track if spec weapon is ready
+    // 1.9.2: tracks the spec-energy value at the most recent pre-activation.
+    // The in-line spec detector now fires only when the current energy is
+    // LOWER than this value — i.e. a real spec has consumed energy. Pre-1.9.2
+    // the detector triggered on "energy < 100" which is true continuously
+    // after the first spec, causing it to spam-click the spec button and
+    // inflate the phase-spec counter (which then wrongly satisfied
+    // teamPhaseNeeded() and blocked the POH restoration tele).
+    private int lastSeenSpecEnergy = 100;
     // ========== STATE HANDLERS ==========
     // State machine timeouts to prevent infinite loops (different timeouts per state)
     private final long lastStateChangeTime = 0;
@@ -2347,32 +2370,34 @@ public class Corp implements TribotScript {
             }
         }
 
-        // 1.8.7 / 1.9.0: detect a pre-activated spec that just fired in-line.
-        // prepareSpecWeaponForCorp pre-activates spec; the first attack
-        // consumes it outside USING_SPECIAL_ATTACK so the normal switch-back
-        // path never runs.
-        // 1.9.0: BEFORE switching back to main weapon, check if we can fire
-        // another spec on the SAME bar — with Elder maul (50%) that's still
-        // 1 more spec, with Arclight (25%) that's 3 more. Pre-1.9.0 the bot
-        // queued switch-back after every single spec, so it only ever fired
-        // one spec per restoration cycle even when phase targets weren't met.
+        // 1.8.7 / 1.9.0 / 1.9.2: detect a pre-activated spec that just fired
+        // in-line. The gate fires only when energy has actually DROPPED since
+        // we last armed spec (lastSeenSpecEnergy) — the pre-1.9.2 "energy<100"
+        // check stayed true forever after spec #1 and caused 30+ false fires
+        // per kill, each one re-activating the spec button (toggle-spam) and
+        // wrongly incrementing the phase-spec counter.
+        int currentSpecPercent = Combat.getSpecialAttackPercent();
         if (specWeaponReadyForUse
                 && !Combat.isSpecialAttackEnabled()
                 && isSpecWeaponEquipped()
-                && Combat.getSpecialAttackPercent() < 100) {
-            Log.info("Pre-activated spec fired in-line");
+                && currentSpecPercent < lastSeenSpecEnergy) {
+            Log.info("Pre-activated spec fired in-line (" + lastSeenSpecEnergy
+                    + "% -> " + currentSpecPercent + "%)");
             // Record the spec we used so the team-phase aggregator advances.
             if (chosenSpecWeapon != null) recordSpecUsed(chosenSpecWeapon);
             specWeaponReadyForUse = false;
+            lastSeenSpecEnergy = currentSpecPercent; // commit new floor
 
             if (canFireAnotherSpecOnThisBar()) {
                 Log.info("Energy + phase targets allow another spec — re-activating spec for next hit");
                 if (Combat.activateSpecialAttack()) {
                     specWeaponReadyForUse = true;
+                    // Re-arm tracking so the NEXT spec fire is detected as a real drop.
+                    lastSeenSpecEnergy = Combat.getSpecialAttackPercent();
                     Log.info("Re-activated special attack: next hit will spec again");
                 }
             } else {
-                Log.info("Spec bar exhausted (or phase targets met / Corp HP below floor) — switching back to main");
+                Log.info("Spec bar exhausted — switching back to main");
                 queueSpecWeaponSwitchBack();
             }
         }
@@ -2381,6 +2406,7 @@ public class Corp implements TribotScript {
 		if (shouldUseSpecialAttack() && !Combat.isSpecialAttackEnabled()) {
 			Log.info("Special attack conditions met - PRE-ACTIVATING for next attack");
 			if (Combat.activateSpecialAttack()) {
+				lastSeenSpecEnergy = Combat.getSpecialAttackPercent(); // 1.9.2: seed detector floor
 				Log.info("Special attack pre-activated in main combat loop");
 			}
 		}
@@ -6132,7 +6158,13 @@ public class Corp implements TribotScript {
 		specWeaponReadyForUse = true;
 		if (!Combat.isSpecialAttackEnabled()) {
 			Log.info("Lobby prep: PRE-ACTIVATING special attack — first Corp hit will spec");
-			Combat.activateSpecialAttack();
+			if (Combat.activateSpecialAttack()) {
+				// 1.9.2: seed the detector's energy floor so the first Corp hit
+				// is recognized as a real spec fire.
+				lastSeenSpecEnergy = Combat.getSpecialAttackPercent();
+			}
+		} else {
+			lastSeenSpecEnergy = Combat.getSpecialAttackPercent();
 		}
 	}
 
@@ -6221,10 +6253,13 @@ public class Corp implements TribotScript {
 					if (!Combat.isSpecialAttackEnabled()) {
 						Log.info("PRE-ACTIVATING special attack now that spec weapon is equipped");
 						if (Combat.activateSpecialAttack()) {
+							lastSeenSpecEnergy = Combat.getSpecialAttackPercent(); // 1.9.2
 							Log.info("Special attack pre-activated successfully!");
 						} else {
 							Log.warn("Failed to pre-activate special attack");
 						}
+					} else {
+						lastSeenSpecEnergy = Combat.getSpecialAttackPercent(); // 1.9.2
 					}
 				}
 			} else {
@@ -6235,8 +6270,11 @@ public class Corp implements TribotScript {
 				if (!Combat.isSpecialAttackEnabled()) {
 					Log.info("PRE-ACTIVATING special attack - weapon ready");
 					if (Combat.activateSpecialAttack()) {
+						lastSeenSpecEnergy = Combat.getSpecialAttackPercent(); // 1.9.2
 						Log.info("Special attack pre-activated successfully!");
 					}
+				} else {
+					lastSeenSpecEnergy = Combat.getSpecialAttackPercent(); // 1.9.2
 				}
 			}
 
