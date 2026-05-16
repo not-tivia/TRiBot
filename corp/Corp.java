@@ -2635,6 +2635,19 @@ public class Corp implements TribotScript {
             Log.info("Activating quick prayer (entering combat)");
             Prayer.enableQuickPrayer();
         }
+        // 1.9.52: also activate Protect from Magic NOW, before the walk
+        // to Corp. Pre-1.9.52 PfM only came on inside handleFightingCorp
+        // -> handleProtectionPrayers, which doesn't run until after
+        // positioning completes. User log: bot walked through Corp's
+        // hitbox eating stomp hits for 7 seconds before PfM activated;
+        // died on the next magic attack. PfM is a 1-prayer-tick toggle,
+        // safe to enable even if quick prayer already covered it.
+        try {
+            if (!Prayer.PROTECT_FROM_MAGIC.isEnabled()) {
+                Log.info("Activating Protect from Magic (entering combat)");
+                Prayer.PROTECT_FROM_MAGIC.enable();
+            }
+        } catch (Exception ignored) {}
         prepareSpecWeaponInLobby();
         // 1.9.17: removed veng cast from handleEnteringCombat. User said
         // "we still veng and do things we dont want to do until we actually
@@ -4498,16 +4511,14 @@ public class Corp implements TribotScript {
         Area corpArea = corpOpt.isPresent() ? corpOpt.get().getArea() : null;
 
         // 1.9.40: HARD pre-filter — reject candidates whose direct line
-        // from the player's current tile crosses Corp's hitbox. User
-        // reported "we literally ran through the entire corps hitbox to
-        // find a place to attack from" — the prior same-side +5 bonus
-        // could be outweighed by separation/self-distance, so the
-        // assignment still picked a far-side tile and the walker routed
-        // through Corp's tiles, taking stomp damage. Fall back to the
-        // unfiltered list only if NO candidate is reachable without
-        // crossing — in that case the caller's waypoint detour does its
-        // best, but at this 1v1 + 1bot mode there's almost always at
-        // least one cardinal that doesn't require crossing.
+        // from the player's current tile crosses Corp's hitbox.
+        // 1.9.52: when all 4 cardinal candidates require crossing, don't
+        // fall back to forcing one — synthesize a single player-side
+        // tile at the hitbox edge in the direction of the player. User
+        // log showed candidates (East 5-east, North 5-north) both
+        // requiring crossing because the player came in from the SW;
+        // the bot picked the canonical North and walked through the
+        // hitbox, taking stomp damage for 7 seconds before dying.
         List<WorldTile> reachable = dynamicPositions;
         if (myPos != null && corpArea != null) {
             List<WorldTile> filtered = dynamicPositions.stream()
@@ -4521,9 +4532,20 @@ public class Corp implements TribotScript {
                             + " reachable without crossing Corp's hitbox");
                 }
             } else {
-                Log.warn("ALL " + dynamicPositions.size()
-                        + " candidate positions require crossing Corp's "
-                        + "hitbox — falling back to detour walk");
+                // 1.9.52: synthesize a player-side fallback tile.
+                WorldTile playerSide = synthesizePlayerSidePosition(
+                        myPos, corpCenter, corpArea);
+                if (playerSide != null) {
+                    Log.info("All " + dynamicPositions.size()
+                            + " cardinals require crossing Corp — using "
+                            + "synthesized player-side tile " + playerSide);
+                    reachable = Arrays.asList(playerSide);
+                } else {
+                    Log.warn("ALL " + dynamicPositions.size()
+                            + " candidate positions require crossing Corp's "
+                            + "hitbox AND no player-side synthesis possible "
+                            + "— falling back to detour walk");
+                }
             }
         }
 
@@ -5672,6 +5694,54 @@ public class Corp implements TribotScript {
                 prayerDeactivationTime = System.currentTimeMillis() + getSkewedRandom(1000, 2000);
             }
         }
+    }
+
+    /** 1.9.52: pick a tile adjacent to Corp's hitbox on the player's side
+     *  (so reaching it doesn't require crossing the hitbox). Used as a
+     *  fallback when all canonical N/S/E/W cardinals would require a
+     *  cross — typically when the player enters from a diagonal angle
+     *  and Corp is positioned such that the perpendicular cardinals
+     *  cross the hitbox.
+     *
+     *  Strategy: project the player onto the nearest edge of Corp's
+     *  bounding box and step 1 tile away from Corp along the direction
+     *  perpendicular to that edge. Result lands the bot 1 tile from
+     *  the hitbox on the player's side, still in melee range. */
+    private WorldTile synthesizePlayerSidePosition(WorldTile myPos,
+                                                   WorldTile corpCenter,
+                                                   Area corpArea) {
+        if (myPos == null || corpCenter == null || corpArea == null) return null;
+        int dx = myPos.getX() - corpCenter.getX();
+        int dy = myPos.getY() - corpCenter.getY();
+        if (dx == 0 && dy == 0) return null;
+        // Step 3 tiles from corp center along the DOMINANT axis (E/W or
+        // N/S whichever is bigger). 3 because corp is 5x5 -> center to
+        // edge = 2 tiles, so center+3 = 1 tile outside hitbox = melee
+        // range. If equal magnitudes, use both (diagonal step).
+        int sx = (dx == 0) ? 0 : Integer.signum(dx);
+        int sy = (dy == 0) ? 0 : Integer.signum(dy);
+        WorldTile candidate;
+        if (Math.abs(dx) >= Math.abs(dy)) {
+            candidate = new WorldTile(corpCenter.getX() + 3 * sx,
+                    corpCenter.getY(), corpCenter.getPlane());
+        } else {
+            candidate = new WorldTile(corpCenter.getX(),
+                    corpCenter.getY() + 3 * sy, corpCenter.getPlane());
+        }
+        if (corpArea.contains(candidate)) return null;
+        if (lineCrossesCorp(myPos, candidate, corpArea)) {
+            // Dominant axis failed — try the other axis.
+            if (Math.abs(dx) >= Math.abs(dy) && sy != 0) {
+                candidate = new WorldTile(corpCenter.getX(),
+                        corpCenter.getY() + 3 * sy, corpCenter.getPlane());
+            } else if (sx != 0) {
+                candidate = new WorldTile(corpCenter.getX() + 3 * sx,
+                        corpCenter.getY(), corpCenter.getPlane());
+            }
+            if (corpArea.contains(candidate)) return null;
+            if (lineCrossesCorp(myPos, candidate, corpArea)) return null;
+        }
+        return candidate;
     }
 
     /** 1.9.49: true if the player is already standing in melee range of
