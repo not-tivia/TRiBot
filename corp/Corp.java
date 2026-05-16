@@ -21,6 +21,23 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.7.1 (2026-05-16) - Hotfix follow-up to 1.9.7:
+ *                          (a) Pool/jewellery-box matching is now action-based,
+ *                              not name-based. The actual object names are
+ *                              "Ornate pool of Rejuvenation" (different word
+ *                              order from 1.9.7's "rejuvenation pool" nameContains)
+ *                              and "Ornate Jewellery Box" (case-mismatched with
+ *                              nameEquals("Ornate jewellery box")). Both
+ *                              expose stable actions ("Drink" / "Corporeal Beast")
+ *                              that work across all tiers.
+ *                          (b) Two more portal double-click bugs of the same
+ *                              shape as enterFriendHouse: isAtHousePortal and
+ *                              the W330 path both had .filter(p -> p.interact(...))
+ *                              which clicks as a side-effect of filtering.
+ *                              Fixed both with .filter(p -> p.getActions()...)
+ *                          (c) Another instant-true Waiting.waitUntil(1000, () -> true)
+ *                              in the Ferox-pool retry path — replaced with a
+ *                              real waitNormal settle delay.
  *   1.9.7 (2026-05-16) - Four fixes after the 1.9.6 test:
  *                        (a) enterFriendHouse double-clicked the portal. The
  *                            filter lambda called portal.interact(...) which
@@ -3085,9 +3102,11 @@ public class Corp implements TribotScript {
                 w330CurrentHost = host;
                 Log.info("W330: attempting to visit " + host + " (try " + w330HostAttempts + ")");
 
+                // 1.9.7.1: same double-click pattern as the friend-house
+                // path — filter must not have side effects.
                 Optional<GameObject> portal = Query.gameObjects()
                         .nameEquals("Portal")
-                        .filter(p -> p.interact("Friend's house"))
+                        .filter(p -> p.getActions().contains("Friend's house"))
                         .findFirst();
                 if (!portal.isPresent()) {
                     Log.warn("W330: no Portal with Friend's house option visible");
@@ -5851,7 +5870,8 @@ public class Corp implements TribotScript {
                         .findFirst();
 
                 if (poolAfterWalk.isPresent()) {
-                    Waiting.waitUntil(1000, () -> true); // Max 1 second but could be shorter
+                    // 1.9.7.1: instant-true wait → real settle delay.
+                    Waiting.waitNormal(400, 200);
                     return poolAfterWalk.get().interact("Drink");
                 }
             }
@@ -7797,24 +7817,17 @@ public class Corp implements TribotScript {
 	 * Simple ornate pool usage
 	 */
 	private boolean useOrnatePool() {
-		// 1.9.7: match the broad detection used by isInFriendHouse (1.9.6)
-		// so the pool-usage step works regardless of the friend's specific
-		// pool tier (Restoration / Revitalisation / Rejuvenation, plus
-		// Basic / Fancy / Ornate variants). Pre-1.9.7 used a single exact
-		// name from settings.poolName which would mismatch a friend's pool
-		// and bail out to EMERGENCY_ESCAPE.
+		// 1.9.7.1: match by ACTION instead of name. The actual pool is
+		// called "Ornate pool of Rejuvenation" — different word order than
+		// the previous "rejuvenation pool" nameContains. Pools regardless
+		// of tier all expose the "Drink" action, so picking by action is
+		// both robust to tier variation AND robust to name word-order.
 		Optional<GameObject> poolOpt = Query.gameObjects()
-				.nameContains("rejuvenation pool")
+				.filter(o -> o.getActions().contains("Drink"))
 				.findFirst();
-		if (!poolOpt.isPresent()) {
-			poolOpt = Query.gameObjects().nameContains("restoration pool").findFirst();
-		}
-		if (!poolOpt.isPresent()) {
-			poolOpt = Query.gameObjects().nameContains("revitalisation pool").findFirst();
-		}
 
 		if (!poolOpt.isPresent()) {
-			Log.error("No POH pool found in render (tried rejuvenation / restoration / revitalisation)");
+			Log.error("No drinkable pool found in render");
 			return false;
 		}
 		Log.info("Using " + poolOpt.get().getName() + " for restoration...");
@@ -7851,26 +7864,26 @@ public class Corp implements TribotScript {
 	 * Simple jewelry box interaction
 	 */
 	private boolean useOrnateJewelryBox() {
-		String boxName = settings.jewelleryBoxName == null || settings.jewelleryBoxName.trim().isEmpty()
-				? "Ornate jewellery box" : settings.jewelleryBoxName.trim();
-		Log.info("Using " + boxName + " to teleport to Corp...");
-
+		// 1.9.7.1: match by ACTION ("Corporeal Beast") instead of name.
+		// The actual object is "Ornate Jewellery Box" (capital J, B) — the
+		// pre-1.9.7.1 nameEquals("Ornate jewellery box") would mismatch
+		// case. Action match handles any jewellery-box tier.
 		Optional<GameObject> jewelryBoxOpt = Query.gameObjects()
-				.nameEquals(boxName)
+				.filter(o -> o.getActions().contains("Corporeal Beast"))
 				.findFirst();
 
 		if (!jewelryBoxOpt.isPresent()) {
-			Log.error(boxName + " not found!");
+			Log.error("No jewellery box with 'Corporeal Beast' action found");
 			return false;
 		}
+		Log.info("Using " + jewelryBoxOpt.get().getName() + " to teleport to Corp...");
 
-		GameObject jewelryBox = jewelryBoxOpt.get();
-		if (jewelryBox.interact("Corporeal Beast")) {
+		if (jewelryBoxOpt.get().interact("Corporeal Beast")) {
 			Log.info("Selected Corporeal Beast teleport, waiting for arrival...");
 			return Waiting.waitUntil(10000, () -> isAtCorp());
 		}
 
-		Log.error("Failed to interact with " + boxName);
+		Log.error("Failed to interact with jewellery box");
 		return false;
 	}
 
@@ -7879,10 +7892,13 @@ public class Corp implements TribotScript {
 	 * Check if we're at the house portal (after teleporting "Outside")
 	 */
 	private boolean isAtHousePortal() {
-		// Look for Portal with "Friend's house" action (this is where we teleport to when using "Outside")
+		// 1.9.7.1: was a side-effect double-click bug — same shape as the
+		// enterFriendHouse one. Calling portal.interact() inside the filter
+		// CLICKS the portal as a side-effect of "is this a match" testing.
+		// Use getActions().contains() — predicate only, no click.
 		return Query.gameObjects()
 				.nameEquals("Portal")
-				.filter(portal -> portal.interact("Friend's house"))
+				.filter(p -> p.getActions().contains("Friend's house"))
 				.findFirst()
 				.isPresent();
 	}
@@ -7891,20 +7907,18 @@ public class Corp implements TribotScript {
 	 * Check if we're in friend's house (simplified)
 	 */
 	private boolean isInFriendHouse() {
-		// 1.9.6: detect POH furniture broadly, not just one specific pool.
-		// Pre-1.9.6 the check looked only for the configured pool name. If
-		// the pool wasn't loaded in render yet (entry delay), or the friend
-		// had a different pool tier, the check failed and the bot kept
-		// re-clicking the friend's-house portal forever.
-		// A finished POH always has a pool OR a jewellery box at minimum,
-		// and neither exists in the entry lobby (which only has a portal).
-		// nameContains is used because pool/box tiers all share these
-		// suffixes — Basic/Fancy/Ornate/Rejuvenation/Restoration/etc.
-		return Query.gameObjects().nameContains("rejuvenation pool").findFirst().isPresent()
-				|| Query.gameObjects().nameContains("restoration pool").findFirst().isPresent()
-				|| Query.gameObjects().nameContains("revitalisation pool").findFirst().isPresent()
-				|| Query.gameObjects().nameContains("jewellery box").findFirst().isPresent()
-				|| Query.gameObjects().nameContains("Spirit tree").findFirst().isPresent();
+		// 1.9.7.1: match by ACTION rather than name. POH pools have "Drink"
+		// and POH jewellery boxes have "Corporeal Beast" (among other tele
+		// actions). The actual object names use varied word order
+		// ("Ornate pool of Rejuvenation" vs "Ornate Jewellery Box") which
+		// kept tripping the name-based match. Actions are stable across
+		// tiers.
+		return Query.gameObjects()
+				.filter(o -> {
+					java.util.List<String> actions = o.getActions();
+					return actions.contains("Drink") || actions.contains("Corporeal Beast");
+				})
+				.findFirst().isPresent();
 	}
 
 
