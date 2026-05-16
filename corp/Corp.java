@@ -2788,6 +2788,25 @@ public class Corp implements TribotScript {
      * Walk to a position but constantly check for Corp visibility and break out immediately
      */
     private boolean walkToPositionWithCorpCheck(WorldTile targetPosition) {
+        // 1.9.67: if Corp is already visible BEFORE the walk, skip the
+        // minimap walk and click-Attack on Corp directly. User: 'when
+        // running into the cave we click on the minimap and sometimes
+        // that sends us too far and sends us running through his body.'
+        // LocalWalking.walkTo to a distant tile triggers a minimap-style
+        // pathfind that can route straight through Corp's hitbox; the
+        // 'Corp visible! Breaking out' poll only triggers AFTER the
+        // walk has already committed. NPC click-attack routes around
+        // the hitbox safely.
+        Optional<Npc> corpEarly = Query.npcs().nameEquals(CORPOREAL_BEAST).findFirst();
+        if (corpEarly.isPresent()) {
+            Log.info("Corp visible before walk — corp.interact('Attack') "
+                    + "instead of minimap walk to " + targetPosition);
+            if (corpEarly.get().interact("Attack")) {
+                return Waiting.waitUntil(6000, () ->
+                        isPlayerInCombat() || MyPlayer.isAnimating());
+            }
+        }
+
         Log.info("Walking to " + targetPosition + " while checking for Corp...");
 
         if (LocalWalking.walkTo(targetPosition)) {
@@ -4665,20 +4684,19 @@ public class Corp implements TribotScript {
                             + " reachable without crossing Corp's hitbox");
                 }
             } else {
-                // 1.9.52: synthesize a player-side fallback tile.
-                WorldTile playerSide = synthesizePlayerSidePosition(
-                        myPos, corpCenter, corpArea);
-                if (playerSide != null) {
-                    Log.info("All " + dynamicPositions.size()
-                            + " cardinals require crossing Corp — using "
-                            + "synthesized player-side tile " + playerSide);
-                    reachable = Arrays.asList(playerSide);
-                } else {
-                    Log.warn("ALL " + dynamicPositions.size()
-                            + " candidate positions require crossing Corp's "
-                            + "hitbox AND no player-side synthesis possible "
-                            + "— falling back to detour walk");
-                }
+                // 1.9.67: when ALL canonical cardinals cross, return null
+                // and let the caller use corp.interact("Attack"). User log
+                // showed the synthesized fallback tile was inside Corp's
+                // hitbox at walk-arrival time — Corp moved 2 tiles between
+                // snapshot and arrival, the supposedly-safe tile became
+                // hitbox-internal, bot took stomp damage. We can't reliably
+                // pre-compute a tile that survives Corp's roaming; the
+                // game's NPC click-attack pathfinder handles approach
+                // safely without ever entering the hitbox.
+                Log.info("ALL " + dynamicPositions.size()
+                        + " cardinals require crossing Corp — returning null "
+                        + "so caller uses corp.interact('Attack')");
+                return null;
             }
         }
 
@@ -6030,6 +6048,21 @@ public class Corp implements TribotScript {
 
 		// Use improved position assignment on SAFE positions only
 		WorldTile bestPosition = assignUniqueCorpPosition(safePositions);
+
+		// 1.9.67: assignUniqueCorpPosition now returns null when all
+		// cardinals cross Corp (synthesize path removed in 1.9.67 because
+		// the synthesized tile could be inside Corp's hitbox by walk
+		// arrival when Corp roamed). Delegate to game pathfinder via
+		// click-attack.
+		if (bestPosition == null) {
+			Log.info("No safe walkable Corp position — corp.interact('Attack') "
+					+ "(let game pathfinder handle approach)");
+			if (corp.interact("Attack")) {
+				return Waiting.waitUntil(6000, () ->
+						isPlayerInCombat() || MyPlayer.isAnimating());
+			}
+			return false;
+		}
 
 		if (bestPosition != null) {
 			Area corpArea = corp.getArea();
