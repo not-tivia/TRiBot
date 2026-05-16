@@ -21,6 +21,57 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.8.6 (2026-05-15) - Two more bugs surfaced in production: Ferox-tele loop
+ *                        and spec-weapon stuck-on after the first spec.
+ *                        - isAtFeroxEnclave: tile-coord check is now primary
+ *                          (x:3120-3160, y:3620-3650, plane 0). Old check
+ *                          relied on "Ferox" NPC / "Pool of Refreshment" /
+ *                          "Bank chest" being in render distance, but the
+ *                          Ring of Dueling drop point doesn't see any of
+ *                          those until the player walks a few tiles. The
+ *                          banking flow's "if (!isAtFeroxEnclave()) tele"
+ *                          loop then burned through every ring charge in
+ *                          inventory in a few ticks (the bug report said
+ *                          "teleported to ferrox using all the rings over
+ *                          and over without walking to the bank"). Object
+ *                          detection retained as fallback.
+ *                        - equipMainWeaponFast: now actually verifies the
+ *                          wield. The old `success = true` initial was never
+ *                          overwritten — the function always returned true
+ *                          even when getAvailableMainWeapon() returned null
+ *                          or the click failed silently. handleSpecWeaponSwitchTiming
+ *                          cleared the switch-back queue on that bogus
+ *                          "success", so a failed Fang re-wield after a spec
+ *                          would leave the bot stuck on the spec weapon for
+ *                          the rest of the kill. Now returns false on any
+ *                          failure path with a specific log line; defender
+ *                          wield remains best-effort so accounts that don't
+ *                          carry one aren't penalised.
+ *   1.8.5 (2026-05-15) - Two combat-loop bug fixes surfaced in production logs.
+ *                        - comboEatToFreeSlot / ensureInventorySlotsFree:
+ *                          The old "Inventory.isFull is now false" success
+ *                          check returned immediately whenever the inventory
+ *                          wasn't full to begin with — so we logged "Combo-
+ *                          eating Cooked karambwan" but never actually ate
+ *                          anything, came back 1 slot short, and bailed with
+ *                          "Cannot free 2 slots for 2H swap". Net effect: bot
+ *                          never executed its initial Elder maul / DWH spec
+ *                          when starting a kill with a near-full inventory.
+ *                          Both helpers now compare inventory count before
+ *                          and after eating. ensureInventorySlotsFree also
+ *                          loops until the target is reached (or food runs
+ *                          out, capped at 28 attempts) instead of running
+ *                          only `toFree` iterations and stopping.
+ *                        - stepAwayFromCore: the 8 candidate offsets were all
+ *                          1-tile neighbours, which land inside Corp's 5x5
+ *                          hitbox when the bot is adjacent to Corp — every
+ *                          tile got rejected and the bot stayed on the core's
+ *                          spawn tile while ESC-eating in a loop ("STEP-AWAY:
+ *                          no walkable target away from core" repeated in the
+ *                          log). Now we try 2/3/4-tile offsets in the away
+ *                          direction first, fall back to perpendicular/short
+ *                          steps last, and explicitly skip any tile that
+ *                          intersects Corp's hitbox (corp.getArea().contains).
  *   1.8.4 (2026-05-15) - Friend-house dialog: corrected widget path for the
  *                        "Last name: <rsn>" shortcut from [162, 38, 0] to
  *                        [162, 39, 0]. Old path silently fell through to the
@@ -1408,37 +1459,51 @@ public class Corp implements TribotScript {
     }
 
     /** Eat a karambwan to free one inventory slot. Karambwan eats over the
-     *  food cooldown so it's safe to call right after a normal food eat. */
+     *  food cooldown so it's safe to call right after a normal food eat.
+     *  Success = item count actually decreased (NOT just "inventory not full",
+     *  which returns immediately when there was already a free slot). */
     private boolean comboEatToFreeSlot() {
         Optional<InventoryItem> kara = Query.inventory().nameEquals("Cooked karambwan").findFirst();
         if (!kara.isPresent()) return false;
+        int countBefore = Query.inventory().count();
         Log.info("Combo-eating Cooked karambwan to free inventory slot");
         if (kara.get().click("Eat")) {
-            return Waiting.waitUntil(2000, () -> !Inventory.isFull());
+            return Waiting.waitUntil(2000, () -> Query.inventory().count() < countBefore);
         }
         return false;
     }
 
-    /** Ensure at least `needed` free inventory slots. Eats karambwans first
-     *  (combo-friendly), falls back to primary food. Returns true on success. */
-    private boolean ensureInventorySlotsFree(int needed) {
-        int free = 28 - Query.inventory().count();
-        if (free >= needed) return true;
-        int toFree = needed - free;
-        for (int i = 0; i < toFree; i++) {
-            if (comboEatToFreeSlot()) continue;
-            // Karambwan path failed — eat a primary food as last resort.
-            if (settings.foodNames != null) {
-                for (String f : settings.foodNames) {
-                    Optional<InventoryItem> food = Query.inventory().nameEquals(f).findFirst();
-                    if (food.isPresent() && food.get().click("Eat")) {
-                        Waiting.waitUntil(2000, () -> !Inventory.isFull());
-                        break;
-                    }
+    /** Eat a primary food (from settings.foodNames) to free one slot. Same
+     *  count-based success criterion as comboEatToFreeSlot. */
+    private boolean eatPrimaryFoodToFreeSlot() {
+        if (settings.foodNames == null) return false;
+        for (String f : settings.foodNames) {
+            if ("Cooked karambwan".equalsIgnoreCase(f)) continue; // handled by combo path
+            Optional<InventoryItem> food = Query.inventory().nameEquals(f).findFirst();
+            if (!food.isPresent()) continue;
+            int countBefore = Query.inventory().count();
+            if (food.get().click("Eat")) {
+                if (Waiting.waitUntil(2000, () -> Query.inventory().count() < countBefore)) {
+                    return true;
                 }
             }
         }
-        return 28 - Query.inventory().count() >= needed;
+        return false;
+    }
+
+    /** Ensure at least `needed` free inventory slots. Eats food until the
+     *  target is reached or we run out (safety cap = 28 attempts to avoid an
+     *  infinite loop on a stuck eat). Previously this looped only `toFree`
+     *  times, exited too early when a karambwan eat's success check fired
+     *  on stale state, and left us 1 slot short of the requirement. */
+    private boolean ensureInventorySlotsFree(int needed) {
+        int safety = 28;
+        while (safety-- > 0 && (28 - Query.inventory().count()) < needed) {
+            if (comboEatToFreeSlot()) continue;
+            if (eatPrimaryFoodToFreeSlot()) continue;
+            break; // out of food
+        }
+        return (28 - Query.inventory().count()) >= needed;
     }
 
     private boolean equipSpecWeapon() {
@@ -2231,9 +2296,11 @@ public class Corp implements TribotScript {
         return false;
     }
 
-    /** Step 2-3 tiles away from the core along our current offset vector so
-     *  the core's jump kills it mid-air. Tries LocalWalking then minimap
-     *  for each candidate (same pattern as stepOffCorp). */
+    /** Step away from the core so its jump kills it mid-air. Tries 2-4 tile
+     *  offsets in the "away from core" direction. Tiles inside Corp's 5x5
+     *  hitbox are skipped — when the bot is adjacent to Corp, all 1-tile
+     *  cardinal neighbours land inside the hitbox, which is why the old
+     *  1-tile-only search frequently logged "no walkable target". */
     private boolean stepAwayFromCore(Npc core) {
         WorldTile myPos = MyPlayer.getTile();
         if (myPos == null || core == null) return false;
@@ -2246,20 +2313,30 @@ public class Corp implements TribotScript {
         int sx = dx == 0 ? 1 : Integer.signum(dx);
         int sy = dy == 0 ? 1 : Integer.signum(dy);
 
+        // Corp's hitbox — we want to step OUTSIDE it. May be null if Corp
+        // isn't visible (shouldn't happen during dark core but defensive).
+        Area corpArea = null;
+        try {
+            Optional<Npc> corpOpt = Query.npcs().nameEquals(CORPOREAL_BEAST).findFirst();
+            if (corpOpt.isPresent()) corpArea = corpOpt.get().getArea();
+        } catch (Exception ignored) {}
+
+        // Candidates ordered: long away-vector first (clean step), then
+        // medium, then fall back to perpendicular / negative directions if
+        // the obvious ones are inside Corp.
         int[][] offsets = {
-                { sx * 3, sy * 3 },
-                { sx * 3, 0 },
-                { 0, sy * 3 },
-                { sx * 2, sy * 2 },
-                { -sx * 2, sy * 2 },
-                { sx * 2, -sy * 2 },
-                { sx * 2, 0 },
-                { 0, sy * 2 }
+                { sx * 4, sy * 4 }, { sx * 4, 0 }, { 0, sy * 4 },
+                { sx * 3, sy * 3 }, { sx * 3, 0 }, { 0, sy * 3 },
+                { sx * 2, sy * 2 }, { sx * 2, 0 }, { 0, sy * 2 },
+                { -sx * 3, sy * 3 }, { sx * 3, -sy * 3 },
+                { -sx * 2, sy * 2 }, { sx * 2, -sy * 2 },
+                { sx, 0 }, { 0, sy }, { -sx, 0 }, { 0, -sy }
         };
 
         for (int[] o : offsets) {
             if (o[0] == 0 && o[1] == 0) continue;
             WorldTile target = new WorldTile(myPos.getX() + o[0], myPos.getY() + o[1], myPos.getPlane());
+            if (corpArea != null && corpArea.contains(target)) continue; // inside Corp = stomp damage
             if (!isTileWalkable(target)) continue;
 
             Log.info("STEP-AWAY: moving to " + target);
@@ -4723,32 +4800,39 @@ public class Corp implements TribotScript {
      */
     // Fix the defender equipping logic
 	private boolean equipMainWeaponFast() {
-		boolean success = true;
-
-		// Equip main weapon
-		String availableMainWeapon = getAvailableMainWeapon();
-		if (availableMainWeapon != null && !isMainWeaponEquipped()) {
+		// Step 1: wield the main weapon if it isn't already equipped.
+		if (!isMainWeaponEquipped()) {
+			String availableMainWeapon = getAvailableMainWeapon();
+			if (availableMainWeapon == null) {
+				Log.warn("equipMainWeaponFast: no main weapon found in inventory or equipment");
+				return false;
+			}
 			Optional<InventoryItem> mainWeaponOpt = Query.inventory().nameEquals(availableMainWeapon).findFirst();
-			if (mainWeaponOpt.isPresent()) {
-				Log.info("Equipping main weapon: " + availableMainWeapon);
-				mainWeaponOpt.get().click("Wield");
-
-				// Wait until main weapon equipped
-			/*	success = Waiting.waitUntil(2000, () -> isMainWeaponEquipped());*/
-                if (success) {
-                    Waiting.waitUntil(2000, () -> isMainWeaponEquipped() && hasDefenderEquipped());
-                }
+			if (!mainWeaponOpt.isPresent()) {
+				// Already in equipment but isMainWeaponEquipped said false — name drift?
+				Log.warn("equipMainWeaponFast: " + availableMainWeapon + " not in inventory either");
+				return false;
+			}
+			Log.info("Equipping main weapon: " + availableMainWeapon);
+			if (!mainWeaponOpt.get().click("Wield")) {
+				Log.warn("equipMainWeaponFast: Wield click failed for " + availableMainWeapon);
+				return false;
+			}
+			if (!Waiting.waitUntil(2000, () -> isMainWeaponEquipped())) {
+				Log.warn("equipMainWeaponFast: " + availableMainWeapon + " did not equip in time");
+				return false;
 			}
 		}
 
-		// Equip defender
+		// Step 2: equip a defender if one is missing. This is a best-effort
+		// step — some setups don't carry a defender and that's OK, so we
+		// don't fail the whole call when defender wield doesn't take.
 		if (!hasDefenderEquipped()) {
 			equipAnyDefender();
-			// Wait until defender equipped
 			Waiting.waitUntil(2000, () -> hasDefenderEquipped());
 		}
 
-		return success;
+		return isMainWeaponEquipped();
 	}
 
 	private boolean isPositionSafeFromCorp(WorldTile position, Npc corp) {
@@ -5195,10 +5279,29 @@ public class Corp implements TribotScript {
     }
 
     private boolean isAtFeroxEnclave() {
-        // Check for Ferox Enclave specific NPCs or objects
-        return Query.npcs().nameContains("Ferox").findFirst().isPresent() ||
-                Query.gameObjects().nameContains("Pool of Refreshment").findFirst().isPresent() ||
-                Query.gameObjects().nameContains("Bank chest").findFirst().isPresent();
+        // Primary check: tile coords. The Ring of Dueling drops us at
+        // approximately (3151, 3636, 0); the wider enclave covers
+        // x:3120-3160, y:3620-3650. This works the moment the teleport
+        // animation ends, before render has populated the bank chest /
+        // pool / NPCs in our visibility window — which is what caused
+        // the infinite-retele loop in 1.8.5.
+        try {
+            WorldTile pos = MyPlayer.getTile();
+            if (pos != null && pos.getPlane() == 0
+                    && pos.getX() >= 3120 && pos.getX() <= 3160
+                    && pos.getY() >= 3620 && pos.getY() <= 3650) {
+                return true;
+            }
+        } catch (Exception ignored) {}
+        // Fallback: named objects/NPCs (covers the rare case where the
+        // coord box is slightly off but we're clearly at Ferox).
+        try {
+            return Query.npcs().nameContains("Ferox").findFirst().isPresent() ||
+                    Query.gameObjects().nameContains("Pool of Refreshment").findFirst().isPresent() ||
+                    Query.gameObjects().nameContains("Bank chest").findFirst().isPresent();
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     // ========== FEROX ENCLAVE METHODS ==========
