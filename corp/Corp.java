@@ -2942,6 +2942,20 @@ public class Corp implements TribotScript {
     }
 
     private void handleFightingCorp() {
+        // 1.9.59: mid-fight prayer-out bank trip. User: 'if we run out
+        // of Prayer and have no prayer potions we can just bank really
+        // quick and grab the supplies we need and hit the pool.' When
+        // prayer is empty AND we have no doses in inventory, go to
+        // BANKING_AND_HEALING — the bank trip handler walks to Ferox,
+        // restocks pots, pools to full, returns. Better than camping
+        // at Corp without Protect Magic and dying.
+        if (Prayer.getPrayerPoints() <= 5 && getPrayerDoses() == 0) {
+            Log.warn("Prayer empty (" + Prayer.getPrayerPoints()
+                    + ") and no prayer pots — heading to bank for restock");
+            currentState = BotState.BANKING_AND_HEALING;
+            return;
+        }
+
         // 1.8.9 / 1.9.4: emergency HP eat-only short-circuit + panic-tele.
         // Pre-1.8.9 the bot would pre-activate spec, swap weapons, and act
         // normally even at critical HP. 1.9.4 adds a panic-tele escalation:
@@ -10429,11 +10443,17 @@ public class Corp implements TribotScript {
             agg.phase3BgsDamage *= multiplier;
         }
 
+        // 1.9.59: skip any phase the bot doesn't own a weapon for. User:
+        // 'we should be able to detect that we dont have a bgs (or
+        // whatever specific weapon) and skip that phase if we somehow
+        // get to it. the real problem is we somehow keep ending up in
+        // phase 3 when just from our items, phase 3 shouldnt exist.'
+        // Phases the bot can't contribute to are treated as completed.
         int natural;
-        if (agg.phase1Specs < INTERNAL_PHASE1_TARGET) natural = 1;
-        else if (agg.phase2Specs < INTERNAL_PHASE2_TARGET) natural = 2;
-        else if (agg.phase3BgsDamage < INTERNAL_PHASE3_BGS_DAMAGE) natural = 3;
-        else return 0; // all targets met — kill phase (no ratchet needed)
+        if (agg.phase1Specs < INTERNAL_PHASE1_TARGET && ownsAnyWeaponForPhase(1)) natural = 1;
+        else if (agg.phase2Specs < INTERNAL_PHASE2_TARGET && ownsAnyWeaponForPhase(2)) natural = 2;
+        else if (agg.phase3BgsDamage < INTERNAL_PHASE3_BGS_DAMAGE && ownsAnyWeaponForPhase(3)) natural = 3;
+        else return 0; // all targets met OR no usable weapon — kill phase
 
         // Ratchet up to the highest phase we've ever needed this kill, never
         // back down. Reset to 0 on kill-end via coordinatorOnKillEnded.
@@ -10471,30 +10491,45 @@ public class Corp implements TribotScript {
         } catch (Exception e) { return 0; }
     }
 
+    /** 1.9.59: per-phase spec weapon preference. Index 0 unused; phases 1-3
+     *  match teamPhaseNeeded()'s output. */
+    private static final String[][] PHASE_SPEC_WEAPONS = {
+            null,
+            { "Elder maul", "Dragon warhammer" },           // Phase 1 (defense)
+            { "Emberlight", "Arclight", "Darklight" },      // Phase 2 (combat levels)
+            { "Bandos godsword" }                           // Phase 3 (damage drain)
+    };
+
+    /** 1.9.59: true if the bot owns (in inventory or equipment) at least one
+     *  spec weapon for the given phase. Used by teamPhaseNeeded() to SKIP
+     *  phases the bot can't contribute to — most often phase 3 on accounts
+     *  without BGS. User: 'we should be able to detect that we dont have a
+     *  bgs (or whatever specific weapon) and skip that phase if we somehow
+     *  get to it.' */
+    private boolean ownsAnyWeaponForPhase(int phase) {
+        if (phase < 1 || phase >= PHASE_SPEC_WEAPONS.length) return false;
+        if (PHASE_SPEC_WEAPONS[phase] == null) return false;
+        List<String> owned = getOwnedSpecWeapons();
+        for (String w : PHASE_SPEC_WEAPONS[phase]) {
+            if (!owned.contains(w)) continue;
+            if (Inventory.contains(new String[]{ w }) || Equipment.contains(w)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Phase D: pick the highest-priority spec weapon I own for the team's
      *  currently-needed phase. Returns null if no usable weapon for this phase
      *  (in which case the bot should fall through to DPS). */
     private String pickSpecWeaponForCurrentPhase() {
         int phase = teamPhaseNeeded();
         if (phase == 0) return null;
-        // Priority within each phase, best-to-worst
-        String[][] preference = {
-                null,
-                { "Elder maul", "Dragon warhammer" },           // Phase 1 (defense)
-                { "Emberlight", "Arclight", "Darklight" },      // Phase 2 (combat levels)
-                { "Bandos godsword" }                           // Phase 3 (damage drain)
-        };
-        if (phase >= preference.length || preference[phase] == null) return null;
+        if (phase >= PHASE_SPEC_WEAPONS.length || PHASE_SPEC_WEAPONS[phase] == null) return null;
         List<String> owned = getOwnedSpecWeapons();
-        for (String w : preference[phase]) {
+        for (String w : PHASE_SPEC_WEAPONS[phase]) {
             if (!owned.contains(w)) continue;
-            // 1.9.33: check Equipment as well as Inventory. Pre-1.9.33 we
-            // only checked Inventory.contains, so if the spec weapon was
-            // already EQUIPPED (e.g. after lobby prep), this returned null
-            // → refreshSpecWeaponForPhase returned false → handleSpecialAttack
-            // bailed with "No usable spec weapon" → bot swapped to Fang
-            // and never specced. Now we count the weapon as usable whether
-            // it's in inventory or already on the player.
+            // 1.9.33: check Equipment as well as Inventory.
             if (Inventory.contains(new String[]{ w }) || Equipment.contains(w)) {
                 return w;
             }
