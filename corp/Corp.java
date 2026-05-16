@@ -5711,30 +5711,46 @@ public class Corp implements TribotScript {
 		return false;
 	}
 
-	/** 1.9.21: pick a waypoint that's on the PLAYER'S side of Corp, far
-	 *  enough out of Corp's hitbox to break the line-crosses-corp
-	 *  problem. Returns null if no usable waypoint found; caller falls
-	 *  through to direct walk. */
+	/** 1.9.31: pick a waypoint that goes AROUND Corp from player to target.
+	 *  The waypoint sits 5 tiles out from Corp's center on the cardinal
+	 *  side that's adjacent to BOTH the player's quadrant AND the target's
+	 *  quadrant. This forces the RuneScape pathfinder to route around
+	 *  Corp's hitbox in one move instead of cutting through it.
+	 *  Pre-1.9.31 the waypoint was on the player's side only — which still
+	 *  required crossing Corp to reach the target on the opposite side.
+	 *  Tries multiple candidates; returns the first that's outside Corp's
+	 *  hitbox and shorter than a straight-line crossing. */
 	private WorldTile pickWaypointAroundCorp(WorldTile myPos, WorldTile target, Npc corp) {
-		if (myPos == null || corp == null) return null;
+		if (myPos == null || target == null || corp == null) return null;
 		Area corpArea = corp.getArea();
 		WorldTile corpCenter = corpArea.getCenter();
-		int dx = myPos.getX() - corpCenter.getX();
-		int dy = myPos.getY() - corpCenter.getY();
-		// Move 5 tiles from Corp center along player's dominant approach axis.
-		WorldTile waypoint;
-		if (Math.abs(dx) >= Math.abs(dy)) {
-			int sign = dx >= 0 ? 1 : -1;
-			waypoint = new WorldTile(corpCenter.getX() + sign * 5,
-					myPos.getY(), corpCenter.getPlane());
-		} else {
-			int sign = dy >= 0 ? 1 : -1;
-			waypoint = new WorldTile(myPos.getX(),
-					corpCenter.getY() + sign * 5, corpCenter.getPlane());
+		int cx = corpCenter.getX(), cy = corpCenter.getY();
+		int z = corpCenter.getPlane();
+
+		// Four candidate waypoints — 5 tiles out from Corp center on each
+		// cardinal side. Score = total path distance via this waypoint
+		// (myPos → waypoint → target). Lower is better, and waypoints
+		// that don't put us through Corp on EITHER leg are preferred.
+		WorldTile[] candidates = new WorldTile[] {
+				new WorldTile(cx - 5, cy, z),  // west
+				new WorldTile(cx + 5, cy, z),  // east
+				new WorldTile(cx, cy - 5, z),  // south
+				new WorldTile(cx, cy + 5, z)   // north
+		};
+		WorldTile best = null;
+		double bestDist = Double.MAX_VALUE;
+		for (WorldTile c : candidates) {
+			if (corpArea.contains(c)) continue;
+			// Neither leg should pass through Corp.
+			if (lineCrossesCorp(myPos, c, corpArea)) continue;
+			if (lineCrossesCorp(c, target, corpArea)) continue;
+			double d = myPos.distanceTo(c) + c.distanceTo(target);
+			if (d < bestDist) {
+				bestDist = d;
+				best = c;
+			}
 		}
-		// Don't pick waypoint inside Corp's hitbox.
-		if (corpArea.contains(waypoint)) return null;
-		return waypoint;
+		return best; // null if no Corp-free waypoint found; caller falls back.
 	}
 
     /** Defender tier priority — highest tier first. The iteration picks the
