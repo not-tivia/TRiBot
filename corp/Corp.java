@@ -8890,6 +8890,32 @@ public class Corp implements TribotScript {
 		}
 	}
 
+	/** 1.9.46: find the friend-house "Last name: <host>" shortcut widget
+	 *  by TEXT content under root 162 (IndexPath-agnostic — same reason
+	 *  1.9.35.2 dropped IndexPath checks). Clicking this widget submits
+	 *  the friend name without needing keyboard focus on the canvas,
+	 *  which is more reliable than Keyboard.pressEnter() after a context
+	 *  switch from the portal interact. */
+	private Optional<Widget> findFriendHouseShortcutByText(String hostName) {
+		if (hostName == null) return Optional.empty();
+		final String hostLower = hostName.toLowerCase();
+		try {
+			return Query.widgets()
+					.inRoots(162)
+					.filter(w -> {
+						String raw = w.getText().orElse("");
+						if (raw.isEmpty()) return false;
+						String clean = raw.replaceAll("<[^>]*>", "")
+								.toLowerCase();
+						return clean.startsWith("last name")
+								&& clean.contains(hostLower);
+					})
+					.findFirst();
+		} catch (Exception e) {
+			return Optional.empty();
+		}
+	}
+
 	private boolean handleFriendNameDialog() {
 		String hostName = getEffectiveFriendName();
 		Log.info("Dialog appeared for host=" + hostName + ", checking widget shortcut first...");
@@ -8911,9 +8937,26 @@ public class Corp implements TribotScript {
 		if (!inputStripped.isEmpty()) {
 			if (inputStripped.equals(hostStripped)) {
 				Log.info("Friend-house input already correct (\"" + existingInput
-						+ "\") — pressing Enter to submit");
-				try { Keyboard.pressEnter(); } catch (Exception ignored) {}
-				return Waiting.waitUntil(10000, () -> isInFriendHouse());
+						+ "\") — submitting");
+				// 1.9.46: try the 'Last name:' shortcut FIRST (clicking
+				// it submits without needing canvas focus), Enter as a
+				// fallback. Pre-1.9.46 we only sent Enter — and Enter
+				// silently no-ops if the canvas has lost focus (which
+				// can happen after the portal click context switch).
+				// User saw attempt 1 fail after 10s of waiting; attempt
+				// 2 succeeded immediately.
+				Optional<Widget> shortcutByText = findFriendHouseShortcutByText(hostName);
+				if (shortcutByText.isPresent()) {
+					Log.info("Clicking 'Last name:' shortcut to submit");
+					shortcutByText.get().click();
+				} else {
+					Log.info("No shortcut widget — pressing Enter");
+					try { Keyboard.pressEnter(); } catch (Exception ignored) {}
+				}
+				// 1.9.46: shorter wait per user — 5s not 10s. If it didn't
+				// work, return false and let the outer retry click the
+				// portal again.
+				return Waiting.waitUntil(5000, () -> isInFriendHouse());
 			} else {
 				Log.info("Friend-house input has stale/wrong text \""
 						+ existingInput + "\" (want \"" + hostName
