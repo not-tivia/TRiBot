@@ -9334,6 +9334,7 @@ public class Corp implements TribotScript {
         mySnapshot.specsThisKill = new LinkedHashMap<>();
         mySnapshot.bgsDamageDealt = 0;
         mySnapshot.claimedCorpOffset = null;  // release positional claim for next kill
+        committedSpecPhase = 0; // 1.9.37: clear per-kill ratchet
     }
 
     // ========== SESSION-END SIGNALING (1.7.1) ==========
@@ -9721,6 +9722,16 @@ public class Corp implements TribotScript {
         return a;
     }
 
+    /** 1.9.37: per-kill ratchet on the team phase needed. Once we cross
+     *  into phase N this kill, we never regress to a lower phase — even
+     *  if the natural calculation says otherwise. This prevents weapon
+     *  thrash from teammate-visibility flicker: realCount drops to 0 when
+     *  TimeToAFK walks behind a wall, multiplier goes 2x → 1x, phase1Specs
+     *  agg drops back below target, "natural" phase regresses 2 → 1, bot
+     *  re-equips Elder maul mid-Arclight-rotation. Reset in
+     *  coordinatorOnKillEnded(). */
+    private int committedSpecPhase = 0;
+
     private int teamPhaseNeeded() {
         // Base aggregate: coordinator if enabled, otherwise just our own snapshot.
         TeamAggregate agg;
@@ -9742,10 +9753,16 @@ public class Corp implements TribotScript {
             agg.phase3BgsDamage *= multiplier;
         }
 
-        if (agg.phase1Specs < INTERNAL_PHASE1_TARGET) return 1;
-        if (agg.phase2Specs < INTERNAL_PHASE2_TARGET) return 2;
-        if (agg.phase3BgsDamage < INTERNAL_PHASE3_BGS_DAMAGE) return 3;
-        return 0;
+        int natural;
+        if (agg.phase1Specs < INTERNAL_PHASE1_TARGET) natural = 1;
+        else if (agg.phase2Specs < INTERNAL_PHASE2_TARGET) natural = 2;
+        else if (agg.phase3BgsDamage < INTERNAL_PHASE3_BGS_DAMAGE) natural = 3;
+        else return 0; // all targets met — kill phase (no ratchet needed)
+
+        // Ratchet up to the highest phase we've ever needed this kill, never
+        // back down. Reset to 0 on kill-end via coordinatorOnKillEnded.
+        if (natural > committedSpecPhase) committedSpecPhase = natural;
+        return committedSpecPhase;
     }
 
     /** Record a successful spec to our local snapshot. For non-BGS weapons, just
