@@ -21,6 +21,35 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.24 (2026-05-16) - Three fixes:
+ *                         (a) Friend-widget shortcut matches ANY descendant
+ *                             of [162, 39] (length>=2, path[1]==39).
+ *                             User saw shortcut on screen but the
+ *                             length==3 && path[2]==0 filter missed it —
+ *                             the dialog's child slot isn't always 0.
+ *                             Now match anywhere under [162, 39, *].
+ *                         (b) Corp-death detection requires EXPLICIT
+ *                             HP-at-zero observation. Pre-1.9.24 said
+ *                             "Corp dead" whenever health bar invisible
+ *                             AND not in combat — but the bar can be
+ *                             invisible 1-2 ticks during transitions
+ *                             while Corp is alive. Bot wasted kills
+ *                             transitioning to LOOTING prematurely.
+ *                             Now: LOOTING only fires when (a) we observe
+ *                             corp.getHealthBarPercent() <= 1.0, OR
+ *                             (b) corp NPC is gone AND we previously
+ *                             flipped the corpSeenAtZeroHp flag (per-kill
+ *                             reset). Real-player teams rely on direct
+ *                             observation; all-bot teams via coordinator
+ *                             would also flip this flag on kill signal.
+ *                         (c) "Poking with Arclight" fix. When the bot
+ *                             reaches kill phase (Corp HP < floor) with
+ *                             a spec weapon still equipped, queue Fang
+ *                             swap immediately. Pre-1.9.24 the swap
+ *                             happened only after a spec FIRE; if
+ *                             shouldUseSpecialAttack gated the spec
+ *                             (HP < floor), no swap queued and the bot
+ *                             poked with Arclight rest of the kill.
  *   1.9.23 (2026-05-16) - Three fixes after the 1.9.22 test:
  *                         (a) Bot stopped attacking Corp after the
  *                             Elder maul -> Arclight phase rotation.
@@ -1281,6 +1310,12 @@ public class Corp implements TribotScript {
     private boolean prayerDeactivationQueued = false;
     private long prayerDeactivationTime = 0;
     private boolean corpWasAliveLastCheck = false;
+    // 1.9.24: explicit "we observed Corp HP at 0" flag. The transition
+    // to LOOTING only fires when this is true. Resets per-kill alongside
+    // other kill-tracking state. With coordinator + bot-only teams, a
+    // teammate-confirmed kill signal would also flip this; with real
+    // players we rely solely on observing the HP bar.
+    private boolean corpSeenAtZeroHp = false;
     // Weapon switching tracking
     private boolean specWeaponSwitchQueued = false;
     private long specWeaponSwitchTime = 0;
@@ -2995,6 +3030,17 @@ public class Corp implements TribotScript {
 			return;
 		}
 
+		// 1.9.24: if we have a spec weapon equipped but shouldUseSpecialAttack
+		// returned false (e.g. Corp HP below spec floor → kill phase), swap
+		// to main weapon. Without this the bot just auto-attacks ("pokes")
+		// with Arclight/Elder maul for the rest of the kill — much lower
+		// DPS than Fang. Skip the swap if a switch-back is already queued.
+		if (isSpecWeaponEquipped() && !specWeaponSwitchQueued
+				&& isInKillPhase()) {
+			Log.info("Kill phase reached with spec weapon still equipped — queueing Fang swap");
+			queueSpecWeaponSwitchBack();
+		}
+
 		// 1.8.8: mid-fight POH restoration. If we're out of spec but the team
 		// hasn't hit its phase targets yet and Corp is still healthy enough
 		// to be worth dumping more stat-reducer specs into, break out of
@@ -3025,32 +3071,38 @@ public class Corp implements TribotScript {
             corpWasAliveLastCheck = corpCurrentlyAlive;
 
             // 1.9.23: re-engage if we're not ATTACKING Corp specifically.
-            // Pre-1.9.23 we only re-attacked when isPlayerInCombat() was
-            // false — but isPlayerInCombat is true whenever Corp hits us,
-            // even if WE aren't attacking back. Production log showed
-            // Arclight pre-activated, Corp hitting us, but no attack from
-            // our side → no XP, no spec fire, no damage. Bot stood there
-            // until Corp died of teammate damage. Now we check
-            // isPlayerAttackingCorp specifically.
             if (!isPlayerAttackingCorp(corp)) {
                 corp.interact("Attack");
             }
 
-            // Check if Corp is dead
-            if (!corp.isHealthBarVisible() && !isPlayerInCombat()) {
-                Log.info("Corp appears to be dead, looking for loot");
+            // 1.9.24: only declare Corp dead when we explicitly observe
+            // HP at/near 0. Pre-1.9.24 we said "dead" when the health bar
+            // wasn't visible AND we weren't in combat — but the health
+            // bar can be invisible for a tick or two during transitions
+            // (e.g., right after a spec or core dodge) while Corp is
+            // very much alive. Bot was transitioning to LOOTING and
+            // wasting the kill. Require: bar visible AND % at/below 1.
+            if (corp.isHealthBarVisible() && corp.getHealthBarPercent() <= 1.0) {
+                Log.info("Corp HP observed at 0 — looking for loot");
+                corpSeenAtZeroHp = true;
                 currentState = BotState.LOOTING;
             }
         } else {
-            // Corp might be dead
+            // 1.9.24: Corp NPC not in render — could be dead, could be
+            // walked off-screen due to roaming. Require corpseenAt0Hp
+            // confirmation before transitioning to LOOTING. Pre-1.9.24
+            // we'd transition immediately and miss the kill if Corp had
+            // briefly wandered out of render.
             if (corpWasAliveLastCheck) {
-                // Corp was alive but now gone - queue prayer deactivation
                 queuePrayerDeactivation();
                 corpWasAliveLastCheck = false;
             }
-
-            Log.info("Corp not found, looking for loot");
-            currentState = BotState.LOOTING;
+            if (corpSeenAtZeroHp) {
+                Log.info("Corp not found AND we saw HP at 0 — looking for loot");
+                currentState = BotState.LOOTING;
+            } else {
+                Log.debug("Corp not in render but no confirmed 0 HP — not transitioning to LOOTING yet");
+            }
         }
     }
 
@@ -6200,6 +6252,7 @@ public class Corp implements TribotScript {
         specWeaponSwitchQueued = false;
         specWeaponSwitchTime = 0;
         needsToSwitchBackFromSpec = false;
+        corpSeenAtZeroHp = false; // 1.9.24: reset per-kill kill-confirmed flag
 
         // IMPORTANT: Try to keep at least one team member in the room to prevent Corp roaming
         // Check if other teammates are staying or if we should stay
@@ -8427,16 +8480,15 @@ public class Corp implements TribotScript {
 		// living at [162, 39, 0]. Match any child of [162, 39] whose text
 		// (after stripping color tags) contains the host name, case-
 		// insensitive.
-		// 1.9.20: lock to the exact path [162, 39, 0]. User identified
-		// this as the first child of [162, 39] where the host name text
-		// lives. `length == 3` means "the path array has 3 elements"
-		// (root → child → grandchild) — that's the depth of [162, 39, 0].
-		// path[2] == 0 is the grandchild index — 0 = first child.
+		// 1.9.24: broadened from path [162, 39, 0] to ANY descendant of
+		// [162, 39] whose text contains the host name. User reported the
+		// shortcut visible on screen but the bot typed anyway — the strict
+		// path[2]==0 filter missed the widget because the dialog's child
+		// index isn't always 0. Match anywhere under [162, 39, *].
 		Optional<Widget> friendWidgetOpt = Query.widgets()
 				.inRoots(162)
-				.filter(w -> w.getIndexPath().length == 3
-						&& w.getIndexPath()[1] == 39
-						&& w.getIndexPath()[2] == 0)
+				.filter(w -> w.getIndexPath().length >= 2
+						&& w.getIndexPath()[1] == 39)
 				.filter(w -> {
 					String raw = w.getText().orElse("");
 					String clean = raw.replaceAll("<[^>]*>", "").toLowerCase();
