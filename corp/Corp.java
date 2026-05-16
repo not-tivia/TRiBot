@@ -2232,32 +2232,39 @@ public class Corp implements TribotScript {
 			}
 		}
 
-		Optional<InventoryItem> specWeaponOpt = Query.inventory().nameEquals(chosenSpecWeapon).findFirst();
-		if (specWeaponOpt.isPresent()) {
-			InventoryItem specWeapon = specWeaponOpt.get();
-			if (specWeapon.click("Wield")) {
-				boolean success = Waiting.waitUntil(3000, () -> isSpecWeaponEquipped());
-				if (success) {
-					Log.info("Successfully equipped spec weapon: " + chosenSpecWeapon);
-					// 1.9.23: if we just wielded a 1H spec weapon (Arclight,
-					// Darklight, Emberlight, Dragon halberd), the offhand
-					// slot is empty — equip a defender for the tank stats.
-					// 2H specs (Elder maul, DWH, BGS, Crystal halberd) take
-					// the offhand slot themselves so we skip the defender
-					// for those.
-					if (!isTwoHandedSpec(chosenSpecWeapon) && !hasDefenderEquipped()) {
-						Log.info("1H spec weapon equipped — adding defender");
-						equipAnyDefender();
-					}
-				} else {
-					Log.error("Failed to equip spec weapon: " + chosenSpecWeapon);
+		// 1.9.32: retry the wield up to 2 times if the verification times
+		// out. Pre-1.9.32 a single failed wield returned false and the
+		// caller couldn't recover — bot ended up in FIGHTING_CORP with
+		// the wrong weapon, never re-attempting the swap.
+		final int MAX_WIELD_ATTEMPTS = 2;
+		boolean success = false;
+		for (int attempt = 1; attempt <= MAX_WIELD_ATTEMPTS && !success; attempt++) {
+			Optional<InventoryItem> specWeaponOpt = Query.inventory()
+					.nameEquals(chosenSpecWeapon).findFirst();
+			if (!specWeaponOpt.isPresent()) {
+				Log.error("Spec weapon not found in inventory: " + chosenSpecWeapon);
+				return false;
+			}
+			if (specWeaponOpt.get().click("Wield")) {
+				success = Waiting.waitUntil(3000, () -> isSpecWeaponEquipped());
+				if (!success && attempt < MAX_WIELD_ATTEMPTS) {
+					Log.warn("Spec weapon wield attempt " + attempt + "/"
+							+ MAX_WIELD_ATTEMPTS + " timed out — retrying");
+					Waiting.waitNormal(400, 150);
 				}
-				return success;
 			}
 		}
-
-		Log.error("Spec weapon not found in inventory: " + chosenSpecWeapon);
-		return false;
+		if (success) {
+			Log.info("Successfully equipped spec weapon: " + chosenSpecWeapon);
+			if (!isTwoHandedSpec(chosenSpecWeapon) && !hasDefenderEquipped()) {
+				Log.info("1H spec weapon equipped — adding defender");
+				equipAnyDefender();
+			}
+		} else {
+			Log.error("Failed to equip spec weapon after " + MAX_WIELD_ATTEMPTS
+					+ " attempts: " + chosenSpecWeapon);
+		}
+		return success;
     }
 
     /**
@@ -2546,11 +2553,9 @@ public class Corp implements TribotScript {
             return;
         }
 
-        // 1.9.27: solo engage. If Corp is alive and visible (we're in the
-        // boss room with no teammate around — e.g. teammate banking or in
-        // their own POH), don't wait forever. Engage Corp solo and keep
-        // dumping specs. User specifically asked the bot to continue
-        // spec-dumping without teammate visibility.
+        // 1.9.27: solo engage. If Corp is alive and visible (we're already
+        // in the boss room with no teammate around — e.g. teammate banking
+        // or in their own POH), engage solo.
         Optional<Npc> corpOpt = Query.npcs().nameEquals(CORPOREAL_BEAST).findFirst();
         if (corpOpt.isPresent() && isCorpAlive(corpOpt.get())) {
             Log.info("Corp visible and alive — engaging solo (no teammates around)");
@@ -2558,7 +2563,22 @@ public class Corp implements TribotScript {
             return;
         }
 
-        // STAY IN LOBBY - wait for team OR Corp respawn
+        // 1.9.32: walk into boss room from lobby. Pre-1.9.32 the bot
+        // would idle in the lobby forever when no teammates were
+        // visible AND Corp wasn't visible from the lobby (Corp isn't
+        // visible from outside the passage). Now: walk through the
+        // passage to check. handleEnteringCombat will engage if Corp
+        // is alive, or fall through if Corp's dead/missing — at which
+        // point we'll come back here and walk back into the lobby
+        // loop, eventually triggering an emergency escape if all
+        // gates fail.
+        if (isInCorpLobby() && !isInCorpBossRoom()) {
+            Log.info("No teammates visible from lobby — walking into boss room to check for Corp");
+            currentState = BotState.ENTERING_COMBAT;
+            return;
+        }
+
+        // STAY IN LOBBY - genuinely nothing to do
         Log.info("No acceptable teammates found AND Corp not visible — staying in lobby...");
         Waiting.waitUntil(5000, () ->
                 hasAcceptableTeammatesInLobby() ||
@@ -2575,6 +2595,14 @@ public class Corp implements TribotScript {
 
     private void handleEnteringCombat() {
         Log.info("Entering combat...");
+
+        // 1.9.32: also reset Corp HP-bar tracker at kill START, not just
+        // at kill end (handleLooting). Stale max from a previous kill
+        // could persist into a new kill if the bot died/respawned or
+        // restoration completed without a kill in between, leading to
+        // either premature "kill phase" detection or premature LOOTING.
+        maxCorpHpPercentThisKill = 0.0;
+        corpSeenAtZeroHp = false;
 
         // 1.9.16: kick off the walk FIRST, then do prep DURING the walk.
         // OSRS walks are server-side: once we've issued the click on the
@@ -4739,7 +4767,12 @@ public class Corp implements TribotScript {
         if (!isInCorpLobby()) {
             return false;
         }
-
+        // 1.9.32: NPE guard. settings.acceptableTeammates could be null
+        // on a freshly-loaded profile or after a settings migration.
+        if (settings == null || settings.acceptableTeammates == null
+                || settings.acceptableTeammates.isEmpty()) {
+            return false;
+        }
         return Query.players()
                 .stream()
                 .anyMatch(player -> settings.acceptableTeammates.contains(player.getName()));
@@ -6478,15 +6511,27 @@ public class Corp implements TribotScript {
 		if (poolOpt.isPresent()) {
 			GameObject pool = poolOpt.get();
 			if (pool.interact("Drink")) {
-				// Only check health and prayer restoration
-				boolean restored = Waiting.waitUntil(10000, () -> {
+				// 1.9.32: HP and prayer may restore on separate ticks
+				// (different update batches server-side). Pre-1.9.32 we
+				// required BOTH to be at max within 10s; if one hit max
+				// first and the other lagged, the wait timed out and
+				// useRestorePool returned false even though the drink
+				// worked. Now: succeed as soon as EITHER reaches max,
+				// then give a brief settle for the other.
+				boolean firstRestored = Waiting.waitUntil(10000, () -> {
 					boolean healthRestored = MyPlayer.getCurrentHealth() >= Skill.HITPOINTS.getActualLevel();
 					boolean prayerRestored = Prayer.getPrayerPoints() >= Skill.PRAYER.getActualLevel();
-					return healthRestored && prayerRestored;
+					return healthRestored || prayerRestored;
 				});
-
-				if (restored) {
-					Log.info("Health and prayer restored at Ferox pool");
+				if (firstRestored) {
+					// Brief settle for the other stat.
+					Waiting.waitUntil(2000, () -> {
+						boolean healthRestored = MyPlayer.getCurrentHealth() >= Skill.HITPOINTS.getActualLevel();
+						boolean prayerRestored = Prayer.getPrayerPoints() >= Skill.PRAYER.getActualLevel();
+						return healthRestored && prayerRestored;
+					});
+					Log.info("Restored at Ferox pool (hp=" + MyPlayer.getCurrentHealth()
+							+ ", prayer=" + Prayer.getPrayerPoints() + ")");
 					return true;
 				}
 			}
