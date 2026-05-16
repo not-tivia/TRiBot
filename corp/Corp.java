@@ -6324,6 +6324,18 @@ public class Corp implements TribotScript {
 		while (specsPerformed < maxSpecs && Combat.getSpecialAttackPercent() >= getMinSpecEnergy()) {
 			int energyBefore = Combat.getSpecialAttackPercent();
 			Log.info("Spec " + (specsPerformed + 1) + " - Energy before: " + energyBefore + "%");
+			// 1.9.48: capture XP and hitsplat-counter baselines BEFORE the spec
+			// click. We'll check post-spec for ANY of the three signals:
+			//   - melee XP delta (most reliable; spec animation locks out
+			//     auto-attacks so any post-fire XP is from the spec)
+			//   - new hitsplat on Corp not present in the baseline list
+			//   - non-zero damage from getMyLargestRecentHitOnCorp
+			// Pre-1.9.48 we relied on getMyLargestRecentHitOnCorp alone with
+			// a flat 600ms wait. User: '2 specs hit and it only counted one'
+			// — that happens when the hitsplat for spec N has already
+			// disappeared (~6 ticks) before spec N+1's check, or when
+			// network/render lag pushes the splat past our wait window.
+			long preSpecXp = getMeleeCombatXp();
 
 			if (corp.interact("Attack")) {
 				// 🔥 WAIT FOR ENERGY DROP INSTEAD OF TIME
@@ -6340,26 +6352,28 @@ public class Corp implements TribotScript {
 
 				if (specExecuted) {
 					specsPerformed++;
-					// 1.9.43: hitsplat verification for ALL spec weapons. Pre-1.9.43
-					// non-BGS specs called recordSpecUsed unconditionally on energy
-					// drop, counting MISSES the same as HITS. User: "I did 10 specs
-					// and it counted all of them as successful" — Corp's high
-					// defence vs Arclight can produce ~20-30% miss rates and we
-					// were overcounting phase progress accordingly. Now wait for
-					// the hitsplat to land and only record if non-zero (a "0"
-					// splat is a miss / splash). BGS path stays the same since
-					// it already used hitsplat for damage tracking.
-					Waiting.waitNormal(600, 200); // let hitsplat register
+					// 1.9.48: poll up to 2s for hit signal (XP delta OR hitsplat).
+					// Either confirms a hit; absence of both = miss.
+					final long preXp = preSpecXp;
+					boolean hitSignal = Waiting.waitUntil(2000, () -> {
+						if (getMeleeCombatXp() > preXp) return true;
+						return getMyLargestRecentHitOnCorp(corp) > 0;
+					});
 					int dmg = getMyLargestRecentHitOnCorp(corp);
 					if ("Bandos godsword".equalsIgnoreCase(chosenSpecWeapon)) {
 						recordSpecUsed(chosenSpecWeapon, dmg);
-						Log.info("BGS spec dealt ~" + dmg + " damage (recorded for team phase 3)");
-					} else if (dmg > 0) {
+						Log.info("BGS spec dealt ~" + dmg
+								+ " damage (recorded for team phase 3)");
+					} else if (hitSignal) {
 						recordSpecUsed(chosenSpecWeapon);
-						Log.info("Spec HIT confirmed (" + dmg + " dmg) for " + chosenSpecWeapon);
+						long xpDelta = getMeleeCombatXp() - preXp;
+						Log.info("Spec HIT confirmed for " + chosenSpecWeapon
+								+ " (xpDelta=" + xpDelta
+								+ ", hitsplat=" + dmg + ")");
 					} else {
 						Log.info("Spec MISS for " + chosenSpecWeapon
-								+ " (no hitsplat) — not counted");
+								+ " (no XP delta and no hitsplat within 2s)"
+								+ " — not counted");
 					}
 					int energyAfter = Combat.getSpecialAttackPercent();
 					Log.info("Special attack " + specsPerformed + "/" + maxSpecs + " executed successfully! Energy: " + energyBefore + "% → " + energyAfter + "%");
