@@ -21,6 +21,25 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.21 (2026-05-16) - CRITICAL: hard gate against typing into public
+ *                         chat. Production log showed the bot typing
+ *                         "TimeToAFK" into PUBLIC CHAT after a state
+ *                         transition closed the friend-house dialog
+ *                         mid-sequence. Chatbox.isOpen() returns true for
+ *                         any chat window (incl. public chat input), so
+ *                         the previous gate didn't catch it. Now:
+ *                           (1) Before typing: require widget [162, 44]
+ *                               (the friend-house name-input field,
+ *                               Chatbox.MES_TEXT2 per user) to be present.
+ *                               If not, abort — return false, don't type.
+ *                           (2) Between typing and pressing Enter:
+ *                               re-verify [162, 44] still exists. If the
+ *                               dialog closed between the two, refuse to
+ *                               press Enter — buffered text would dump
+ *                               into public chat.
+ *                         This is a major detection-vector fix; never
+ *                         type unless we can prove the right dialog is
+ *                         open.
  *   1.9.20 (2026-05-16) - Two fixes:
  *                         (a) Friend-widget shortcut now targets the exact
  *                             path [162, 39, 0] (first child of [162, 39]
@@ -8277,21 +8296,48 @@ public class Corp implements TribotScript {
 		}
 
 		// Fallback: Type host's name manually
-		Log.info("No widget shortcut found, typing host name: " + hostName);
+		Log.info("No widget shortcut found, attempting to type host name: " + hostName);
+
+		// 1.9.21: HARD safety gate before typing. Pre-1.9.21 we trusted
+		// Chatbox.isOpen() but that returns true for ANY chat window —
+		// including the public chat input. Production log showed the bot
+		// typing "TimeToAFK" into PUBLIC CHAT after a state transition
+		// closed the friend-house dialog. That's a major detection
+		// vector. Now we require the friend-house input widget
+		// [162, 44] to be present AND visible before typing — if not,
+		// abort, don't type anything.
+		Optional<Widget> inputFieldOpt = Query.widgets()
+				.inRoots(162)
+				.filter(w -> w.getIndexPath().length == 2
+						&& w.getIndexPath()[1] == 44)
+				.findFirst();
+		if (!inputFieldOpt.isPresent()) {
+			Log.warn("Friend-house input widget [162, 44] not present — "
+					+ "refusing to type (would risk typing into public chat)");
+			return false;
+		}
+		Log.info("Verified friend-house input widget present, typing now");
 
 		try {
-			// 1.9.7 / 1.9.11: pre-typing settle delay. The chatbox "Enter
-			// name" dialog opens visually but the input field isn't always
-			// focused for keyboard input in the same tick. Pre-1.9.11 the
-			// first 3-4 characters of "TimeToAFK" got eaten by the focus
-			// transition, leaving the buffer at "ToAfK" and the entry
-			// failing because no friend by that name exists. A 400-700ms
-			// settle wait gives the dialog time to grab focus before we
-			// start typing.
+			// 1.9.7 / 1.9.11: pre-typing settle delay so the input field
+			// is focused before we start typing.
 			Waiting.waitNormal(550, 150);
 			Keyboard.typeString(hostName);
 			Waiting.waitNormal(900, 200);
 
+			// 1.9.21: re-verify input field still exists before pressing
+			// Enter. If the dialog closed between typing and Enter (e.g.
+			// timeout), pressing Enter could send the buffered text to
+			// public chat.
+			boolean stillInDialog = Query.widgets()
+					.inRoots(162)
+					.filter(w -> w.getIndexPath().length == 2
+							&& w.getIndexPath()[1] == 44)
+					.findFirst().isPresent();
+			if (!stillInDialog) {
+				Log.warn("Dialog closed between typing and Enter — NOT pressing Enter");
+				return false;
+			}
 			Keyboard.pressEnter();
 
 			Log.info("Typed host name and pressed Enter, waiting for entry...");
