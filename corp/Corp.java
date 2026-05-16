@@ -21,6 +21,27 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.22 (2026-05-16) - Three behavior fixes:
+ *                         (a) No more emergency-escape just because the
+ *                             teammate isn't visible. Teammates can walk
+ *                             out of render or be obscured mid-fight;
+ *                             that's not an emergency. Spec dumping
+ *                             continues regardless of teammate visibility.
+ *                             Emergency triggers reduced to actual danger:
+ *                             low HP, no food, no prayer.
+ *                         (b) withdrawFood now skips a food type if the
+ *                             inventory already has the target count.
+ *                             Pre-1.9.22 we always tried to withdraw at
+ *                             least the target amount, even when the
+ *                             deposit step had left full counts behind —
+ *                             "cannot fit" errors at the bank.
+ *                         (c) handleTravelingToCorp closes the bank if
+ *                             still open before clicking the Games
+ *                             necklace. Bank intercepts inventory
+ *                             item-clicks while open, turning a
+ *                             "Corporeal Beast" tele into a quantity
+ *                             prompt — the bot would silently fail to
+ *                             tele and get stuck at Ferox.
  *   1.9.21 (2026-05-16) - CRITICAL safety fix + walk-around-Corp fix.
  *                         (a) Hard gate against typing into public chat.
  *                             Production log showed the bot typing
@@ -2324,6 +2345,17 @@ public class Corp implements TribotScript {
 
 	private void handleTravelingToCorp() {
 		Log.info("Traveling to Corporeal Beast...");
+
+		// 1.9.22: close the bank if it's still open. Clicking Games
+		// necklace "Corporeal Beast" while bank is open opens a
+		// quantity-input prompt instead of teleporting (Bank intercepts
+		// inventory item-clicks). Pre-1.9.22 we'd just silently fail to
+		// tele and end up stuck at Ferox.
+		if (Bank.isOpen()) {
+			Log.info("Bank still open — closing before tele to Corp");
+			Bank.close();
+			Waiting.waitUntil(2000, () -> !Bank.isOpen());
+		}
 
 		Optional<InventoryItem> necklaceOpt = Query.inventory().nameContains("Games necklace(").findFirst();
 		if (!necklaceOpt.isPresent()) {
@@ -6741,28 +6773,38 @@ public class Corp implements TribotScript {
     }
 
     private boolean withdrawFood() {
-        List<String> foodTasks = Arrays.asList("karambwans", "sharks");
-
-        // Randomize food withdrawal order
+        // 1.9.22: skip withdrawal of a food type if we already have the
+        // target count of it. Pre-1.9.22 we always withdrew at least the
+        // target amount, even if the deposit step had left full counts
+        // in the inventory — causing a "cannot fit" failure when the
+        // inventory was already topped up.
+        List<String> foodTasks = new ArrayList<>(Arrays.asList("karambwans", "sharks"));
         Collections.shuffle(foodTasks);
 
         boolean firstFood = true;
-
         for (String foodType : foodTasks) {
             if (foodType.equals("karambwans")) {
-                int amount = firstFood ? 10 : 0; // 10 first, then withdraw-all
+                int have = Inventory.getCount("Cooked karambwan");
+                int want = settings.targetKarambwans;
+                if (have >= want) {
+                    Log.info("Skip karambwans withdraw — already have " + have + "/" + want);
+                    continue;
+                }
+                int amount = firstFood ? Math.max(1, want - have) : 0;
                 if (!withdrawKarambwans(amount)) return false;
             } else {
-                int amount = firstFood ? 10 : 0; // 10 first, then withdraw-all
+                int have = Inventory.getCount("Shark");
+                int want = settings.targetSharks;
+                if (have >= want) {
+                    Log.info("Skip sharks withdraw — already have " + have + "/" + want);
+                    continue;
+                }
+                int amount = firstFood ? Math.max(1, want - have) : 0;
                 if (!withdrawSharks(amount)) return false;
             }
-
-            firstFood = false; // Next iteration will be second food
-
-            // Random delay between food types
+            firstFood = false;
             Waiting.waitUniform(400, 900);
         }
-
         return true;
     }
 
@@ -7302,9 +7344,13 @@ public class Corp implements TribotScript {
             return false;
         }
 
-        // Original conditions
+        // 1.9.22: removed "teammate not visible" from emergency triggers.
+        // Teammates can briefly walk out of render or be obscured during
+        // combat — that's not an emergency. Mid-fight spec dumping should
+        // continue regardless of teammate visibility. The remaining
+        // triggers (low HP, no food, no prayer) cover the actual danger
+        // cases.
         boolean originalEmergency = MyPlayer.getCurrentHealth() <= INTERNAL_EMERGENCY_HP ||
-                (isAtCorp() && !hasAcceptableTeammatesWithGracePeriod() && isPlayerInCombat()) ||
                 (Inventory.getCount(settings.foodNames) == 0 && isPlayerInCombat()) ||
                 (Prayer.getPrayerPoints() == 0 && getPrayerDoses() == 0 && isPlayerInCombat());
 
