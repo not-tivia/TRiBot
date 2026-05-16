@@ -8111,19 +8111,20 @@ public class Corp implements TribotScript {
 					return clean.contains(hostLower);
 				})
 				.filter(w -> {
-					// 1.9.16: require an action AND the widget to be
-					// actively rendered. Pre-1.9.16 text-only label widgets
-					// matched the text filter but had no actions (or zero-
-					// sized bounds), and widget.click() fell through to a
-					// ground click — bot walked off into the distance
-					// instead of teleing.
+					// 1.9.16: require an action AND not-hidden. Pre-1.9.16
+					// text-only label widgets matched the text filter but
+					// had no actions (or zero-sized bounds), and
+					// widget.click() fell through to a ground click — bot
+					// walked off into the distance instead of teleing.
+					// 1.9.16.1: isBeingDrawn() isn't part of the public
+					// SDK; rely on getActions() + !isHidden().
 					try {
 						if (w.getActions() == null || w.getActions().isEmpty()) return false;
 					} catch (Throwable ignored) {
 						return false;
 					}
 					try {
-						return w.isBeingDrawn() && !w.isHidden();
+						return !w.isHidden();
 					} catch (Throwable ignored) {
 						return false;
 					}
