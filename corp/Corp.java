@@ -5878,22 +5878,26 @@ public class Corp implements TribotScript {
 		WorldTile bestPosition = assignUniqueCorpPosition(safePositions);
 
 		if (bestPosition != null) {
-			// 1.9.21: multi-step walk if the straight line from player to
-			// bestPosition would cross Corp's hitbox. Pre-1.9.21 we
-			// LocalWalking-walked directly to the target — RuneScape's
-			// L-shape pathing then routed through Corp's tile and the
-			// bot took stomp damage. Now we route via a waypoint on the
-			// player's side of Corp first. (myPos already declared above.)
 			Area corpArea = corp.getArea();
+			// 1.9.53: if the straight-line walk would cross Corp's hitbox,
+			// DON'T walk — click Attack on Corp instead. The game's
+			// NPC-click pathfinder routes the player to a safe melee tile
+			// without ever entering the hitbox. User: 'we dont get stomped
+			// on moving to our desired tile. it happens every single kill
+			// almost.' Pre-1.9.53 we tried a custom waypoint detour, but
+			// LocalWalking.walkTo internally uses the SDK pathfinder which
+			// can still route through Corp's tiles between intermediate
+			// steps. Letting the game choose the path is the only way to
+			// guarantee no stomp damage.
 			if (myPos != null && lineCrossesCorp(myPos, bestPosition, corpArea)) {
-				WorldTile waypoint = pickWaypointAroundCorp(myPos, bestPosition, corp);
-				if (waypoint != null) {
-					Log.info("Path to " + bestPosition + " crosses Corp — "
-							+ "walking via waypoint " + waypoint + " first");
-					LocalWalking.walkTo(waypoint);
-					Waiting.waitUntil(4000, () ->
-							MyPlayer.getTile().distanceTo(waypoint) <= 2);
+				Log.info("Path to " + bestPosition + " crosses Corp — "
+						+ "clicking Attack on Corp instead (game pathfinder "
+						+ "handles routing without stomp damage)");
+				if (corp.interact("Attack")) {
+					return Waiting.waitUntil(6000, () ->
+							isPlayerInCombat() || MyPlayer.isAnimating());
 				}
+				return false;
 			}
 			if (LocalWalking.walkTo(bestPosition)) {
 				Log.info("Moving to safe Corp position: " + bestPosition);
