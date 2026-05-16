@@ -21,6 +21,22 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.8.9 (2026-05-16) - Survival fixes after a death log: bot was firing
+ *                        pre-activated spec and swapping weapons at single-
+ *                        digit HP instead of eating.
+ *                        (a) New top-of-handleFightingCorp short-circuit at
+ *                            INTERNAL_EMERGENCY_HP: eat (combo if possible),
+ *                            cancel pre-activated spec so the next attack
+ *                            doesn't waste it, skip swap/vengeance/positioning
+ *                            this tick, return. Dark-core check still runs
+ *                            (being inside the core is what's killing us;
+ *                            dodging out matters more than eating in place).
+ *                        (b) New INTERNAL_COMBO_EAT_HP = 50. Pre-1.8.9
+ *                            combo-eat only fired at <= 15 HP, which let
+ *                            the bot fall into one-shot range before
+ *                            reacting. handleHealthAndPrayer now combo-eats
+ *                            (38 HP from Shark+Karambwan) whenever HP
+ *                            drops below 50, outpacing Corp's damage.
  *   1.8.8 (2026-05-16) - Restoration model rebuilt to match real Corp meta:
  *                        spec → POH → spec → POH until phase targets met or
  *                        Corp HP drops below the floor (a teammate is
@@ -582,6 +598,11 @@ public class Corp implements TribotScript {
     public static final int INTERNAL_PHASE3_BGS_DAMAGE = 200; // BGS damage drained
     public static final int INTERNAL_EAT_BELOW_MAX_HP = 21;
     public static final int INTERNAL_EMERGENCY_HP = 15;
+    // 1.8.9: combo-eat (Shark + Karambwan) trigger. Corp hits hard enough that
+    // normal-eating at maxHp-21 (~78) can't keep up — by the time the next
+    // tick fires the bot is already taking another swing. Combo eat below 50
+    // gives a 38-HP heal in one cycle which actually outpaces Corp damage.
+    public static final int INTERNAL_COMBO_EAT_HP = 50;
     public static final int INTERNAL_DRINK_PRAYER_THRESHOLD = 20;
     public static final int INTERNAL_CORP_LOW_HP_VENG_STOP = 85;
     public static final int INTERNAL_COORD_WRITE_INTERVAL_TICKS = 5;
@@ -2206,6 +2227,30 @@ public class Corp implements TribotScript {
     }
 
     private void handleFightingCorp() {
+        // 1.8.9: emergency HP eat-only short-circuit. Pre-1.8.9 the bot would
+        // happily pre-activate spec, swap weapons, and otherwise act normally
+        // even at critical HP. The previous death log: HP dropped to single
+        // digits while the bot was still firing pre-activated spec and
+        // switching weapons mid-combo-eat. Spec-firing burns the next attack
+        // (no DPS benefit when already dying) and weapon swaps occupy the
+        // animation slot eating wants to use.
+        // At INTERNAL_EMERGENCY_HP we eat, cancel any pre-activated spec, and
+        // skip everything else this tick. Dark-core detection still runs
+        // because being inside the core IS the thing killing us — dodging
+        // out is more important than eating in place.
+        int currentHpEmergency = MyPlayer.getCurrentHealth();
+        if (currentHpEmergency <= INTERNAL_EMERGENCY_HP && !isDarkCorePresent()) {
+            Log.warn("Emergency HP (" + currentHpEmergency + ") — eat-only mode, " +
+                    "skipping spec/swap/vengeance this tick");
+            emergencyComboEat();
+            if (Combat.isSpecialAttackEnabled()) {
+                Log.info("Cancelling pre-activated spec to avoid burning it while dying");
+                Combat.activateSpecialAttack(); // toggles off
+                specWeaponReadyForUse = false;
+            }
+            return;
+        }
+
         // PRIORITY 1: Handle Dark Core (most dangerous) - Updated detection
         if (isDarkCorePresent()) {
             darkCoreLastSeen = System.currentTimeMillis();
@@ -6269,12 +6314,13 @@ public class Corp implements TribotScript {
     private void handleHealthAndPrayer() {
         int currentHealth = MyPlayer.getCurrentHealth();
 
-        // Emergency combo eating for critically low health
-        if (currentHealth <= INTERNAL_EMERGENCY_HP) {
+        // 1.8.9: combo eat (Shark + Karambwan, 38 HP) whenever HP is below 50.
+        // Pre-1.8.9 the script only combo-ate at <= INTERNAL_EMERGENCY_HP (15),
+        // which let HP fall into "one Corp hit kills you" range before
+        // reacting. Above 50, normal single-eat is enough to keep pace.
+        if (currentHealth <= INTERNAL_COMBO_EAT_HP) {
             emergencyComboEat();
-        }
-        // Normal eating for regular health management
-        else if (currentHealth <= eatHealthThreshold()) {
+        } else if (currentHealth <= eatHealthThreshold()) {
             normalEat();
         }
 
