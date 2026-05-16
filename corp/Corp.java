@@ -21,6 +21,20 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.9 (2026-05-16) - XP-based spec hit detection. Pre-1.9.9 every spec
+ *                        fire (hit OR miss) bumped the phase counter, so
+ *                        the bot would rotate weapons after 4 spec ATTEMPTS
+ *                        even if half missed. Now we snapshot melee XP
+ *                        (Attack + Strength + Defence + Hitpoints, NOT
+ *                        Magic — Magic XP is vengeance) at every spec
+ *                        activation. After the spec fires (energy drop),
+ *                        we wait one tick for XP to register and check the
+ *                        delta:
+ *                          XP increased → spec HIT → recordSpecUsed
+ *                          XP unchanged after 2s → spec MISS → don't record
+ *                        Real-teammate multiplier is unchanged: each
+ *                        confirmed hit still counts × (1 + realTeammates)
+ *                        in the team aggregate per the user's spec.
  *   1.9.8 (2026-05-16) - Three follow-up fixes after the 1.9.7.1 success:
  *                        (a) Defer phase-rotation equip. Rotating Elder maul
  *                            → Arclight always happens at energy 0 (just spent
@@ -990,6 +1004,15 @@ public class Corp implements TribotScript {
     // inflate the phase-spec counter (which then wrongly satisfied
     // teamPhaseNeeded() and blocked the POH restoration tele).
     private int lastSeenSpecEnergy = 100;
+    // 1.9.9: XP-based hit detection. After a spec fires (energy drop), we
+    // wait for combat XP to register. Increase = the hit landed; no
+    // increase = miss. Only landed specs advance the phase counter. Magic
+    // XP is excluded because vengeance casts would produce false positives.
+    private long xpAtSpec = -1;
+    private String pendingHitWeapon = null;
+    private long pendingHitXpBaseline = -1;
+    private long pendingHitDeadline = 0;
+    private static final long HIT_CONFIRM_TIMEOUT_MS = 2000;
     // ========== STATE HANDLERS ==========
     // State machine timeouts to prevent infinite loops (different timeouts per state)
     private final long lastStateChangeTime = 0;
@@ -2508,6 +2531,11 @@ public class Corp implements TribotScript {
             return;
         }
 
+        // 1.9.9: process any deferred spec-hit confirmation BEFORE running
+        // new spec logic. The previous tick's spec may have just registered
+        // XP — confirm hit (advance phase) or mark miss (don't).
+        processPendingSpecHit();
+
         // PRIORITY 1: Handle Dark Core (most dangerous) - Updated detection
         if (isDarkCorePresent()) {
             darkCoreLastSeen = System.currentTimeMillis();
@@ -2565,10 +2593,21 @@ public class Corp implements TribotScript {
                 && currentSpecPercent < lastSeenSpecEnergy) {
             Log.info("Pre-activated spec fired in-line (" + lastSeenSpecEnergy
                     + "% -> " + currentSpecPercent + "%)");
-            // Record the spec we used so the team-phase aggregator advances.
-            if (chosenSpecWeapon != null) recordSpecUsed(chosenSpecWeapon);
             specWeaponReadyForUse = false;
             lastSeenSpecEnergy = currentSpecPercent; // commit new floor
+
+            // 1.9.9: defer recordSpecUsed until XP confirms the hit. Pre-1.9.9
+            // every spec fire (hit OR miss) bumped the phase counter, so the
+            // bot rotated weapons after 4 spec ATTEMPTS instead of 4 hits.
+            // Capture the weapon used for THIS spec (chosenSpecWeapon may
+            // rotate below) and the XP baseline (snapshotted at pre-activate
+            // time, before the spec fired). processPendingSpecHit runs next
+            // tick and either confirms or misses.
+            if (chosenSpecWeapon != null) {
+                pendingHitWeapon = chosenSpecWeapon;
+                pendingHitXpBaseline = xpAtSpec;
+                pendingHitDeadline = System.currentTimeMillis() + HIT_CONFIRM_TIMEOUT_MS;
+            }
 
             // 1.9.5: phase rotation. If this spec pushed us past a phase
             // target, update chosenSpecWeapon to the next-phase weapon
@@ -2597,6 +2636,7 @@ public class Corp implements TribotScript {
                     specWeaponReadyForUse = true;
                     // Re-arm tracking so the NEXT spec fire is detected as a real drop.
                     lastSeenSpecEnergy = Combat.getSpecialAttackPercent();
+                    xpAtSpec = getMeleeCombatXp(); // 1.9.9: baseline for next spec
                     Log.info("Re-activated special attack: next hit will spec again");
                 }
             } else {
@@ -2621,7 +2661,7 @@ public class Corp implements TribotScript {
 		if (shouldUseSpecialAttack() && !Combat.isSpecialAttackEnabled()) {
 			Log.info("Special attack conditions met - PRE-ACTIVATING for next attack");
 			if (Combat.activateSpecialAttack()) {
-				lastSeenSpecEnergy = Combat.getSpecialAttackPercent(); // 1.9.2: seed detector floor
+				lastSeenSpecEnergy = Combat.getSpecialAttackPercent(); xpAtSpec = getMeleeCombatXp(); // 1.9.2 + 1.9.9: seed detector floor
 				Log.info("Special attack pre-activated in main combat loop");
 			}
 		}
@@ -4588,6 +4628,11 @@ public class Corp implements TribotScript {
         specWeaponSwitchQueued = false;
         specWeaponSwitchTime = 0;
         needsToSwitchBackFromSpec = false;
+        // 1.9.9: reset XP-based hit detection tracking on new trip.
+        xpAtSpec = -1;
+        pendingHitWeapon = null;
+        pendingHitXpBaseline = -1;
+        pendingHitDeadline = 0;
 
         startedFightingWithTeammates = false;
         fightStartTime = 0;
@@ -6393,12 +6438,15 @@ public class Corp implements TribotScript {
 		if (!Combat.isSpecialAttackEnabled()) {
 			Log.info("Lobby prep: PRE-ACTIVATING special attack — first Corp hit will spec");
 			if (Combat.activateSpecialAttack()) {
-				// 1.9.2: seed the detector's energy floor so the first Corp hit
-				// is recognized as a real spec fire.
+				// 1.9.2 + 1.9.9: seed the detector's energy floor and the XP
+				// baseline so the first Corp hit is recognized as a real spec
+				// fire AND its XP delta confirms hit/miss.
 				lastSeenSpecEnergy = Combat.getSpecialAttackPercent();
+				xpAtSpec = getMeleeCombatXp();
 			}
 		} else {
 			lastSeenSpecEnergy = Combat.getSpecialAttackPercent();
+			xpAtSpec = getMeleeCombatXp();
 		}
 	}
 
@@ -6487,13 +6535,13 @@ public class Corp implements TribotScript {
 					if (!Combat.isSpecialAttackEnabled()) {
 						Log.info("PRE-ACTIVATING special attack now that spec weapon is equipped");
 						if (Combat.activateSpecialAttack()) {
-							lastSeenSpecEnergy = Combat.getSpecialAttackPercent(); // 1.9.2
+							lastSeenSpecEnergy = Combat.getSpecialAttackPercent(); xpAtSpec = getMeleeCombatXp(); // 1.9.2 + 1.9.9
 							Log.info("Special attack pre-activated successfully!");
 						} else {
 							Log.warn("Failed to pre-activate special attack");
 						}
 					} else {
-						lastSeenSpecEnergy = Combat.getSpecialAttackPercent(); // 1.9.2
+						lastSeenSpecEnergy = Combat.getSpecialAttackPercent(); xpAtSpec = getMeleeCombatXp(); // 1.9.2 + 1.9.9
 					}
 				}
 			} else {
@@ -6504,11 +6552,11 @@ public class Corp implements TribotScript {
 				if (!Combat.isSpecialAttackEnabled()) {
 					Log.info("PRE-ACTIVATING special attack - weapon ready");
 					if (Combat.activateSpecialAttack()) {
-						lastSeenSpecEnergy = Combat.getSpecialAttackPercent(); // 1.9.2
+						lastSeenSpecEnergy = Combat.getSpecialAttackPercent(); xpAtSpec = getMeleeCombatXp(); // 1.9.2 + 1.9.9
 						Log.info("Special attack pre-activated successfully!");
 					}
 				} else {
-					lastSeenSpecEnergy = Combat.getSpecialAttackPercent(); // 1.9.2
+					lastSeenSpecEnergy = Combat.getSpecialAttackPercent(); xpAtSpec = getMeleeCombatXp(); // 1.9.2 + 1.9.9
 				}
 			}
 
@@ -7045,6 +7093,43 @@ public class Corp implements TribotScript {
      *  after every bank trip and on script start. */
     private void invalidateOwnedSpecWeaponsCache() {
         ownedSpecWeaponsCache = null;
+    }
+
+    /** 1.9.9: sum of melee combat XP (Attack + Strength + Defence + Hitpoints).
+     *  Magic is excluded because vengeance casts give Magic XP and would
+     *  produce false hit confirmations for Elder maul / DWH / Arclight / BGS
+     *  specs (all melee weapons). Returns 0 on SDK error rather than
+     *  throwing — a "no XP delta" result is treated as a miss, which is
+     *  conservative. */
+    private long getMeleeCombatXp() {
+        try {
+            return Skill.ATTACK.getXp()
+                    + Skill.STRENGTH.getXp()
+                    + Skill.DEFENCE.getXp()
+                    + Skill.HITPOINTS.getXp();
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /** 1.9.9: process the deferred hit confirmation. Called once at the top
+     *  of handleFightingCorp every tick. If XP has increased since the
+     *  baseline, the spec hit — record it and clear the pending state.
+     *  If 2 seconds have elapsed without XP, treat as a miss. */
+    private void processPendingSpecHit() {
+        if (pendingHitWeapon == null) return;
+        long nowXp = getMeleeCombatXp();
+        if (nowXp > pendingHitXpBaseline) {
+            recordSpecUsed(pendingHitWeapon);
+            Log.info("Spec HIT confirmed via XP delta +"
+                    + (nowXp - pendingHitXpBaseline) + " for " + pendingHitWeapon);
+            pendingHitWeapon = null;
+        } else if (System.currentTimeMillis() > pendingHitDeadline) {
+            Log.info("Spec MISSED (no XP delta after "
+                    + HIT_CONFIRM_TIMEOUT_MS + "ms) for " + pendingHitWeapon
+                    + " — not advancing phase counter");
+            pendingHitWeapon = null;
+        }
     }
 
     /** 1.9.0 / 1.9.1: can we fire another spec on the current bar?
