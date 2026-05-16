@@ -6395,9 +6395,20 @@ public class Corp implements TribotScript {
 		boolean canSpecAgain = energyLeft >= getMinSpecEnergy()
 				&& teamPhaseNeeded() != 0
 				&& !isInKillPhase();
-		if (canSpecAgain) {
+		// 1.9.45: also keep the spec weapon if we're about to teleport to
+		// POH for restoration. Pre-1.9.45 the queue fired during the next
+		// FIGHTING_CORP tick BEFORE shouldStartRestorationCycle ran in
+		// handleFightingCorp — Fang got equipped, then the bot teleported
+		// to POH with Fang. After restoration the bot came back at 100%
+		// energy needing to re-equip the spec weapon. Two wasted swaps
+		// per restoration cycle. User: 'we equipped our defender and
+		// fang which we shouldnt do.'
+		boolean willRestore = shouldStartRestorationCycle();
+		if (canSpecAgain || willRestore) {
 			Log.info("Holding spec weapon (" + chosenSpecWeapon + "): "
-					+ energyLeft + "% energy left, phase targets remain");
+					+ energyLeft + "% energy left, "
+					+ (willRestore ? "restoration cycle pending"
+							: "phase targets remain"));
 		} else {
 			queueSpecWeaponSwitchBack();
 		}
