@@ -21,6 +21,24 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.5 (2026-05-16) - Phase rotation now happens mid-bar. The full Corp
+ *                        meta is Phase 1 → Phase 2 → Phase 3:
+ *                          Phase 1 (defense reducers): 4 Elder maul / DWH
+ *                          Phase 2 (combat-level reducers): 20 Arclight /
+ *                                                            Darklight /
+ *                                                            Emberlight
+ *                          Phase 3 (HP drain): 200 BGS damage
+ *                        Pre-1.9.5 the in-line spec detector never called
+ *                        refreshSpecWeaponForPhase(), so the bot stayed on
+ *                        Elder maul forever even after the 4 phase-1 specs
+ *                        landed. Also refreshSpecWeaponForPhase itself was
+ *                        gated on settings.coordinatorEnabled, so solo bots
+ *                        wouldn't rotate even if the call was added.
+ *                        Fixes: dropped the coordinator gate (rotation works
+ *                        for solo via buildSoloAggregate); the detector now
+ *                        calls refreshSpecWeaponForPhase after every
+ *                        recordSpecUsed and equips the new weapon if the
+ *                        choice changed.
  *   1.9.4 (2026-05-16) - Strategy + survival fixes after a death log.
  *                        Insight: during spec-dump phase the spec weapon
  *                        IS the main weapon. Fang only comes out at the
@@ -2453,6 +2471,25 @@ public class Corp implements TribotScript {
             if (chosenSpecWeapon != null) recordSpecUsed(chosenSpecWeapon);
             specWeaponReadyForUse = false;
             lastSeenSpecEnergy = currentSpecPercent; // commit new floor
+
+            // 1.9.5: phase rotation. If this spec pushed us past a phase
+            // target, swap to the next-phase weapon (Elder maul → Arclight
+            // → BGS) so the next attack uses the right tool for the team's
+            // current need. Pre-1.9.5 rotation only happened in the pre-
+            // engagement spec loops; mid-fight bars stayed on Phase 1
+            // forever even after 4 Elder maul specs landed.
+            String previousSpecWeapon = chosenSpecWeapon;
+            refreshSpecWeaponForPhase();
+            boolean phaseRotated = chosenSpecWeapon != null
+                    && previousSpecWeapon != null
+                    && !chosenSpecWeapon.equals(previousSpecWeapon);
+            if (phaseRotated) {
+                Log.info("Phase target met for " + previousSpecWeapon
+                        + " — rotating to " + chosenSpecWeapon);
+                if (Inventory.contains(chosenSpecWeapon)) {
+                    equipSpecWeapon();
+                }
+            }
 
             if (canFireAnotherSpecOnThisBar()) {
                 Log.info("Energy + phase targets allow another spec — re-activating spec for next hit");
@@ -8645,16 +8682,22 @@ public class Corp implements TribotScript {
      *  set, switch to our best Phase 2 weapon. Returns true if a usable weapon was
      *  picked; false if we have nothing for the current phase. */
     private boolean refreshSpecWeaponForPhase() {
-        if (!settings.coordinatorEnabled) return chosenSpecWeapon != null;
+        // 1.9.5: removed the coordinatorEnabled gate. teamPhaseNeeded() works
+        // for solo bots too via buildSoloAggregate (sums per-weapon-by-phase
+        // from mySnapshot.specsThisKill). Pre-1.9.5 the rotation was locked
+        // to coordinator mode, so a solo bot would stay on Elder maul forever
+        // even after the 4 phase-1 specs landed.
         String desired = pickSpecWeaponForCurrentPhase();
         if (desired == null) {
-            chosenSpecWeapon = null;
+            // No weapon for current phase needed — don't null out
+            // chosenSpecWeapon (keep it for kill-phase fall-through logic).
             return false;
         }
         if (!desired.equals(chosenSpecWeapon)) {
-            Log.info("Phase D: switching spec weapon " + chosenSpecWeapon + " -> " + desired);
+            Log.info("Phase rotation: switching spec weapon "
+                    + chosenSpecWeapon + " -> " + desired);
             chosenSpecWeapon = desired;
-            // The equipSpecWeapon() call later in the spec flow will handle the swap.
+            // Caller is responsible for equipping the new weapon.
         }
         return true;
     }
