@@ -5879,26 +5879,47 @@ public class Corp implements TribotScript {
 
 		if (bestPosition != null) {
 			Area corpArea = corp.getArea();
-			// 1.9.53: if the straight-line walk would cross Corp's hitbox,
-			// DON'T walk — click Attack on Corp instead. The game's
-			// NPC-click pathfinder routes the player to a safe melee tile
-			// without ever entering the hitbox. User: 'we dont get stomped
-			// on moving to our desired tile. it happens every single kill
-			// almost.' Pre-1.9.53 we tried a custom waypoint detour, but
-			// LocalWalking.walkTo internally uses the SDK pathfinder which
-			// can still route through Corp's tiles between intermediate
-			// steps. Letting the game choose the path is the only way to
-			// guarantee no stomp damage.
+			// 1.9.54: explicit L-shape walk around Corp's hitbox using
+			// CORNER waypoints, not 5-tile-out cardinals. Walk to a
+			// corner of Corp's expanded bounding box first, verify we
+			// got there safely (not inside Corp's hitbox AND straight
+			// line to bestPosition no longer crosses), THEN walk to
+			// bestPosition. User showed diagrams: bot should L-shape
+			// around the hitbox, not cut through. Pre-1.9.54 the
+			// waypoint code timed out at 4s and proceeded straight to
+			// bestPosition even if the waypoint walk hadn't actually
+			// gotten the bot past Corp.
 			if (myPos != null && lineCrossesCorp(myPos, bestPosition, corpArea)) {
-				Log.info("Path to " + bestPosition + " crosses Corp — "
-						+ "clicking Attack on Corp instead (game pathfinder "
-						+ "handles routing without stomp damage)");
-				if (corp.interact("Attack")) {
-					return Waiting.waitUntil(6000, () ->
-							isPlayerInCombat() || MyPlayer.isAnimating());
+				WorldTile corner = pickCornerWaypoint(myPos, bestPosition,
+						corp.getArea().getCenter(), corpArea);
+				if (corner != null) {
+					Log.info("Path to " + bestPosition + " crosses Corp — "
+							+ "L-shape via corner " + corner + " first");
+					LocalWalking.walkTo(corner);
+					// Wait until either we reached the corner OR the line
+					// to bestPosition no longer crosses Corp from our
+					// current tile (means we've effectively rounded the
+					// hitbox). 8s timeout so a slow walk doesn't hand us
+					// off to the straight-line fallback mid-stomp.
+					Waiting.waitUntil(8000, () -> {
+						WorldTile cur = MyPlayer.getTile();
+						if (cur == null) return false;
+						if (corpArea.contains(cur)) return false;
+						if (cur.distanceTo(corner) <= 1) return true;
+						return !lineCrossesCorp(cur, bestPosition, corpArea);
+					});
+				} else {
+					Log.warn("No safe corner waypoint found — falling back "
+							+ "to click-Attack on Corp (game pathfinder)");
+					if (corp.interact("Attack")) {
+						return Waiting.waitUntil(6000, () ->
+								isPlayerInCombat() || MyPlayer.isAnimating());
+					}
+					return false;
 				}
-				return false;
 			}
+			// At this point either the original path didn't cross OR we've
+			// L-shaped past the hitbox; safe to walk straight to target.
 			if (LocalWalking.walkTo(bestPosition)) {
 				Log.info("Moving to safe Corp position: " + bestPosition);
 				return Waiting.waitUntil(5000, () ->
@@ -5926,6 +5947,48 @@ public class Corp implements TribotScript {
 			if (corpArea.contains(inter)) return true;
 		}
 		return false;
+	}
+
+	/** 1.9.54: pick an L-shape corner waypoint at one of the 4 corners of
+	 *  Corp's expanded 7x7 bounding box (1 tile outside the hitbox in each
+	 *  diagonal direction). Tries each corner and returns the first one
+	 *  where BOTH legs (player->corner AND corner->target) don't cross
+	 *  Corp's hitbox. Picks the corner with shortest total path distance.
+	 *  Returns null if no corner satisfies both checks — caller falls
+	 *  back to click-attack on Corp (game pathfinder).
+	 *
+	 *  Why corners instead of the 1.9.31 cardinal-5-out waypoints: a
+	 *  corner enforces a true 90-degree turn, so each leg is mostly a
+	 *  single-axis move that the SDK pathfinder is much less likely to
+	 *  re-route through Corp's hitbox. The cardinal-5-out points are
+	 *  in line with Corp's center on one axis, which often produces
+	 *  long diagonal legs the pathfinder shortcuts. */
+	private WorldTile pickCornerWaypoint(WorldTile player, WorldTile target,
+	                                     WorldTile corpCenter, Area corpArea) {
+		if (player == null || target == null || corpCenter == null) return null;
+		int cx = corpCenter.getX(), cy = corpCenter.getY();
+		int z = corpCenter.getPlane();
+		// Corners of the 7x7 expanded bounding box (Corp hitbox is 5x5 centered
+		// on cx,cy; +3 puts the corner 1 tile diagonally outside).
+		WorldTile[] corners = new WorldTile[] {
+				new WorldTile(cx - 3, cy + 3, z), // NW
+				new WorldTile(cx + 3, cy + 3, z), // NE
+				new WorldTile(cx - 3, cy - 3, z), // SW
+				new WorldTile(cx + 3, cy - 3, z)  // SE
+		};
+		WorldTile best = null;
+		double bestDist = Double.MAX_VALUE;
+		for (WorldTile corner : corners) {
+			if (corpArea.contains(corner)) continue;
+			if (lineCrossesCorp(player, corner, corpArea)) continue;
+			if (lineCrossesCorp(corner, target, corpArea)) continue;
+			double d = player.distanceTo(corner) + corner.distanceTo(target);
+			if (d < bestDist) {
+				bestDist = d;
+				best = corner;
+			}
+		}
+		return best;
 	}
 
 	/** 1.9.31: pick a waypoint that goes AROUND Corp from player to target.
