@@ -21,6 +21,38 @@ import java.util.stream.Collectors;
 
 /*
  * CHANGELOG
+ *   1.9.7 (2026-05-16) - Four fixes after the 1.9.6 test:
+ *                        (a) enterFriendHouse double-clicked the portal. The
+ *                            filter lambda called portal.interact(...) which
+ *                            actually clicks as a side-effect of filtering,
+ *                            and then the code called interact() again outside
+ *                            the filter. Use .getActions().contains() for
+ *                            filtering, interact exactly once.
+ *                        (b) handleFriendNameDialog typed the host name then
+ *                            pressed Enter inside the same tick — the typing-
+ *                            then-wait used Waiting.waitUntil(2000, () -> true)
+ *                            which returns instantly. Replaced with a real
+ *                            900±200ms wait so the game-side typing buffer
+ *                            actually registers before Enter.
+ *                        (c) useOrnatePool() required an exact match against
+ *                            settings.poolName ("Ornate rejuvenation pool"
+ *                            default). Friend's house has a different pool
+ *                            tier → "pool not found" → emergency Ferox tele
+ *                            even though we'd successfully entered the
+ *                            house. Now uses the same broad nameContains
+ *                            check as isInFriendHouse — any rejuvenation /
+ *                            restoration / revitalisation pool works.
+ *                        (d) handleUsingInitialSpecs called equipMainWeaponFast
+ *                            ("Switching back to main weapon before house
+ *                            teleport") right before tele. The spec weapon
+ *                            should stay equipped through the POH cycle.
+ *                            User: "we want to spec twice and tele out and
+ *                            that's essentially it. Anything else is wasted
+ *                            input." Removed the swap; Fang swap reserved
+ *                            for the kill-phase transition only.
+ *                        Plus log spam fix: handleEnteringFriendHouse no
+ *                        longer logs "Attempting to enter..." every 50ms
+ *                        tick while throttled — only on the actual attempt.
  *   1.9.6 (2026-05-16) - Three fixes after the user's 1.9.5 test:
  *                        (a) In-line spec detector swapped to Fang when
  *                            shouldStartRestorationCycle returned false at
@@ -7192,8 +7224,11 @@ public class Corp implements TribotScript {
 				Combat.getSpecialAttackPercent() < getMinSpecEnergy()) {
 
 			Log.info("Finished all special attacks - Energy remaining: " + Combat.getSpecialAttackPercent() + "%");
-			Log.info("Switching back to main weapon before house teleport");
-			equipMainWeaponFast();
+			// 1.9.7: don't swap to Fang before house teleport. The spec
+			// weapon stays equipped through POH so the next bar can start
+			// firing immediately on return. User wants minimal actions:
+			// spec → spec → tele → restore → tele → spec → spec → ...
+			// The Fang swap is reserved for the kill-phase transition.
 			currentState = BotState.TELEPORTING_TO_HOUSE;
 			return;
 		}
@@ -7349,7 +7384,10 @@ public class Corp implements TribotScript {
 
 	private void handleEnteringFriendHouse() {
 		String hostName = getEffectiveFriendName();
-		Log.info("Attempting to enter " + hostName + "'s house (mode=" + getPohSource() + ")");
+		// 1.9.7: this method ran every main-loop tick (~50ms). Pre-1.9.7
+		// every entry logged "Attempting to enter..." even when the throttle
+		// blocked the actual attempt — 10+ identical log lines per second
+		// of waiting. Move the log INSIDE the actual-attempt branch.
 
 		if (hostName == null || hostName.trim().isEmpty()) {
 			Log.error("No host name resolved (pohSource=" + getPohSource()
@@ -7374,12 +7412,14 @@ public class Corp implements TribotScript {
 
 		long timeSinceLastAttempt = System.currentTimeMillis() - lastHouseEntryAttempt;
 		if (timeSinceLastAttempt < HOUSE_ENTRY_RETRY_DELAY_MIN) {
-			Log.info("Waiting before next house entry attempt...");
+			// 1.9.7: was logging spam every 50ms tick; silent throttle now.
 			return;
 		}
 
 		currentHouseEntryAttempts++;
 		lastHouseEntryAttempt = System.currentTimeMillis();
+		Log.info("Attempting to enter " + hostName + "'s house (mode=" + getPohSource()
+				+ ", attempt " + currentHouseEntryAttempts + ")");
 
 		if (enterFriendHouse()) {
 			Log.info("Successfully entered " + hostName + "'s house");
@@ -7624,10 +7664,14 @@ public class Corp implements TribotScript {
 		String hostName = getEffectiveFriendName();
 		Log.info("Attempting to enter " + hostName + "'s house via portal...");
 
-		// Look for Portal with "Friend's house" action
+		// 1.9.7: pre-1.9.7 the filter lambda called portal.interact(...)
+		// which actually CLICKS the portal as a side-effect of the filter.
+		// Then the code called interact() AGAIN outside the filter — two
+		// clicks on the portal in rapid succession. Use the actions list
+		// to pick the right portal, then interact exactly once.
 		Optional<GameObject> portalOpt = Query.gameObjects()
 				.nameEquals("Portal")
-				.filter(portal -> portal.interact("Friend's house"))
+				.filter(p -> p.getActions().contains("Friend's house"))
 				.findFirst();
 
 		if (!portalOpt.isPresent()) {
@@ -7635,18 +7679,18 @@ public class Corp implements TribotScript {
 			return false;
 		}
 
-		GameObject portal = portalOpt.get();
-		if (portal.interact("Friend's house")) {
-			Log.info("Clicked 'Friend's house', waiting for dialog...");
-
-			// Wait for dialog to appear
-			if (Waiting.waitUntil(5000, () -> Chatbox.isOpen())) {
-				return handleFriendNameDialog();
-			}
+		if (!portalOpt.get().interact("Friend's house")) {
+			Log.error("Failed to interact with portal");
+			return false;
 		}
+		Log.info("Clicked 'Friend's house', waiting for dialog...");
 
-		Log.error("Failed to interact with portal");
-		return false;
+		// Wait for the typing dialog to actually appear before we type.
+		if (!Waiting.waitUntil(5000, () -> Chatbox.isOpen())) {
+			Log.warn("Friend's-house dialog did not open within 5s");
+			return false;
+		}
+		return handleFriendNameDialog();
 	}
 
 	/**
@@ -7690,11 +7734,14 @@ public class Corp implements TribotScript {
 		Log.info("No widget shortcut found, typing host name: " + hostName);
 
 		try {
-			// Type host's name (void method)
+			// 1.9.7: pre-1.9.7 used Waiting.waitUntil(2000, () -> true) which
+			// returns instantly (predicate is already true). The bot typed
+			// and pressed Enter in the same tick, before the game-side typing
+			// buffer registered the text → submit-empty → entry fails.
+			// Use a real human-paced delay between typing and Enter.
 			Keyboard.typeString(hostName);
-            Waiting.waitUntil(2000, () -> true); // Brief wait for typing
+			Waiting.waitNormal(900, 200);
 
-			// Press Enter (void method)
 			Keyboard.pressEnter();
 
 			Log.info("Typed host name and pressed Enter, waiting for entry...");
@@ -7750,18 +7797,27 @@ public class Corp implements TribotScript {
 	 * Simple ornate pool usage
 	 */
 	private boolean useOrnatePool() {
-		String poolName = settings.poolName == null || settings.poolName.trim().isEmpty()
-				? "Ornate rejuvenation pool" : settings.poolName.trim();
-		Log.info("Using " + poolName + "...");
-
+		// 1.9.7: match the broad detection used by isInFriendHouse (1.9.6)
+		// so the pool-usage step works regardless of the friend's specific
+		// pool tier (Restoration / Revitalisation / Rejuvenation, plus
+		// Basic / Fancy / Ornate variants). Pre-1.9.7 used a single exact
+		// name from settings.poolName which would mismatch a friend's pool
+		// and bail out to EMERGENCY_ESCAPE.
 		Optional<GameObject> poolOpt = Query.gameObjects()
-				.nameEquals(poolName)
+				.nameContains("rejuvenation pool")
 				.findFirst();
+		if (!poolOpt.isPresent()) {
+			poolOpt = Query.gameObjects().nameContains("restoration pool").findFirst();
+		}
+		if (!poolOpt.isPresent()) {
+			poolOpt = Query.gameObjects().nameContains("revitalisation pool").findFirst();
+		}
 
 		if (!poolOpt.isPresent()) {
-			Log.error(poolName + " not found!");
+			Log.error("No POH pool found in render (tried rejuvenation / restoration / revitalisation)");
 			return false;
 		}
+		Log.info("Using " + poolOpt.get().getName() + " for restoration...");
 
 		GameObject pool = poolOpt.get();
 		if (pool.interact("Drink")) {
