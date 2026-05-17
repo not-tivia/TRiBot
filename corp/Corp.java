@@ -2417,8 +2417,40 @@ public class Corp implements TribotScript {
             }
         }
 
+        // 1.9.86: bank-open check by widget content as backup. User:
+        // 'it was still hovering trying to click on the bank but it
+        // wasnt clickable because the bank screen was already open
+        // so it got stuck hovering over it over and over.' Bank.isOpen()
+        // returns false even when the bank UI is visibly open on this
+        // client. The interact() click then hovers over the chest
+        // beneath the open UI (unclickable). Detect bank-open by
+        // searching for the standard 'Bank of RuneScape' / 'The Bank'
+        // header text under any chatbox/bank-related root — visible
+        // when the bank interface is up.
+        boolean bankActuallyOpen;
+        try {
+            bankActuallyOpen = Bank.isOpen()
+                    || Query.widgets()
+                        .filter(w -> {
+                            String raw = w.getText().orElse("");
+                            if (raw.isEmpty()) return false;
+                            String clean = raw.replaceAll("<[^>]*>", "")
+                                    .trim().toLowerCase();
+                            return clean.startsWith("the bank of runescape")
+                                    || clean.startsWith("bank of runescape")
+                                    || clean.equals("rearrange mode")
+                                    || clean.startsWith("search:")
+                                    || clean.startsWith("deposit inventory")
+                                    || clean.startsWith("deposit worn");
+                        })
+                        .findFirst()
+                        .isPresent();
+        } catch (Exception e) {
+            bankActuallyOpen = Bank.isOpen();
+        }
+
         // Step 4: Open bank
-        if (!Bank.isOpen()) {
+        if (!bankActuallyOpen) {
             // 1.9.14: settle delay before clicking the bank chest.
             Waiting.waitNormal(700, 200);
             // Try to find and left-click bank chest specifically
