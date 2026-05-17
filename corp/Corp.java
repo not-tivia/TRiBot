@@ -1337,6 +1337,80 @@ public class Corp implements TribotScript {
     // unpredictable final state. Use this timestamp to skip activation if
     // we clicked recently — trust the prior click instead.
     private long lastSpecActivateAt = 0;
+    // 1.9.78: randomized spec pre-activation timing. Each restoration
+    // trip the bot rolls 50% at 3 stages (POH-before-tele, Corp-lobby,
+    // boss-room). First "yes" wins and activates spec; final stage is
+    // forced (guaranteed activation by the time we engage Corp). Once
+    // a stage is rolled, we don't re-roll it this trip — pattern stays
+    // varied across trips instead of activating at the same moment
+    // every cycle.
+    private boolean specPreActivatedThisTrip = false;
+    private boolean preActivateStageARolled = false;
+    private boolean preActivateStageBRolled = false;
+    private final java.util.Random preActivateRng = new java.util.Random();
+
+    /** 1.9.78: stage A — after pool drink, before tele back to Corp.
+     *  50% chance to pre-activate. Logged result either way so we can
+     *  see the dice rolls in the log. */
+    private void maybePreActivateSpecStageA() {
+        if (specPreActivatedThisTrip || preActivateStageARolled) return;
+        preActivateStageARolled = true;
+        if (Combat.getSpecialAttackPercent() < getMinSpecEnergy()) return;
+        if (preActivateRng.nextBoolean()) {
+            Log.info("Spec pre-activate stage A (POH): rolled YES");
+            if (tryActivateSpec()) {
+                specPreActivatedThisTrip = true;
+                lastSeenSpecEnergy = Combat.getSpecialAttackPercent();
+                xpAtSpec = getMeleeCombatXp();
+            }
+        } else {
+            Log.info("Spec pre-activate stage A (POH): rolled NO");
+        }
+    }
+
+    /** 1.9.78: stage B — in Corp lobby, before walking to boss room.
+     *  Another 50% chance if stage A didn't activate. */
+    private void maybePreActivateSpecStageB() {
+        if (specPreActivatedThisTrip || preActivateStageBRolled) return;
+        preActivateStageBRolled = true;
+        if (Combat.getSpecialAttackPercent() < getMinSpecEnergy()) return;
+        if (preActivateRng.nextBoolean()) {
+            Log.info("Spec pre-activate stage B (lobby): rolled YES");
+            if (tryActivateSpec()) {
+                specPreActivatedThisTrip = true;
+                lastSeenSpecEnergy = Combat.getSpecialAttackPercent();
+                xpAtSpec = getMeleeCombatXp();
+            }
+        } else {
+            Log.info("Spec pre-activate stage B (lobby): rolled NO");
+        }
+    }
+
+    /** 1.9.78: stage C — boss room. FORCED activate if not yet done. */
+    private void forcePreActivateSpecStageC() {
+        if (specPreActivatedThisTrip) return;
+        if (Combat.getSpecialAttackPercent() < getMinSpecEnergy()) return;
+        if (!Combat.isSpecialAttackEnabled()) {
+            Log.info("Spec pre-activate stage C (boss room): FORCED");
+            if (tryActivateSpec()) {
+                specPreActivatedThisTrip = true;
+                lastSeenSpecEnergy = Combat.getSpecialAttackPercent();
+                xpAtSpec = getMeleeCombatXp();
+            }
+        } else {
+            // already on (e.g. from a prior tick) — flag it as done
+            specPreActivatedThisTrip = true;
+        }
+    }
+
+    /** 1.9.78: reset the pre-activation state machine. Called after a
+     *  successful pool drink so the next restoration cycle gets fresh
+     *  dice rolls. */
+    private void resetSpecPreActivationRolls() {
+        specPreActivatedThisTrip = false;
+        preActivateStageARolled = false;
+        preActivateStageBRolled = false;
+    }
     // 1.9.40: friend-house typing debounce — wall-clock guard against double-typing.
     private long lastFriendHouseTypeAt = 0;
     private static final long FRIEND_HOUSE_TYPE_DEBOUNCE_MS = 12000;
@@ -3043,6 +3117,15 @@ public class Corp implements TribotScript {
         // new spec logic. The previous tick's spec may have just registered
         // XP — confirm hit (advance phase) or mark miss (don't).
         processPendingSpecHit();
+
+        // 1.9.78: stage C — if neither pool-roll nor lobby-roll activated
+        // spec, force it now that we're in the boss room. Only fires when
+        // we have a spec weapon equipped (otherwise activating spec is
+        // wasted clicks) and a spec weapon for the current phase is owned.
+        if (!specPreActivatedThisTrip && isSpecWeaponEquipped()
+                && pickSpecWeaponForCurrentPhase() != null) {
+            forcePreActivateSpecStageC();
+        }
 
         // PRIORITY 1: Handle Dark Core (most dangerous) - Updated detection
         if (isDarkCorePresent()) {
@@ -7800,16 +7883,13 @@ public class Corp implements TribotScript {
 		}
 
 		specWeaponReadyForUse = true;
-		if (!Combat.isSpecialAttackEnabled()) {
-			Log.info("Lobby prep: PRE-ACTIVATING special attack — first Corp hit will spec");
-			if (tryActivateSpec()) { // 1.9.34
-				// 1.9.2 + 1.9.9: seed the detector's energy floor and the XP
-				// baseline so the first Corp hit is recognized as a real spec
-				// fire AND its XP delta confirms hit/miss.
-				lastSeenSpecEnergy = Combat.getSpecialAttackPercent();
-				xpAtSpec = getMeleeCombatXp();
-			}
-		} else {
+		// 1.9.78: stage B — roll for spec pre-activate in the lobby
+		// (only if stage A at the pool didn't already activate).
+		// The 50% miss case falls through to stage C in handleFightingCorp.
+		maybePreActivateSpecStageB();
+		// If neither stage A nor B activated, leave the energy floor /
+		// xp baseline in their pre-activate state for stage C to handle.
+		if (Combat.isSpecialAttackEnabled() && specPreActivatedThisTrip) {
 			lastSeenSpecEnergy = Combat.getSpecialAttackPercent();
 			xpAtSpec = getMeleeCombatXp();
 		}
@@ -9148,6 +9228,10 @@ public class Corp implements TribotScript {
 			if (useOrnatePool()) {
 				Log.info("Successfully used ornate pool (including 0.6s wait)");
 				poolWaitStartedAt = 0; // reset wait timer for next time
+				// 1.9.78: fresh dice rolls for the new restoration trip.
+				resetSpecPreActivationRolls();
+				// Stage A: roll right after the pool fills us up.
+				maybePreActivateSpecStageA();
 			} else {
 				Log.error("Failed to use ornate pool - ending restoration");
 				emergencyResetPOHSystem();
