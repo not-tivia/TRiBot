@@ -1829,16 +1829,17 @@ public class Corp implements TribotScript {
      *  "Other". HTML color tags are stripped before comparison. */
     private boolean isVengeanceSelfWidget(Widget w) {
         if (w == null) return false;
+        // 1.9.75: sprite ID 564 is the Vengeance Self icon — user's widget
+        // inspector screenshot confirmed it. Sprite ID is the most stable
+        // identifier (doesn't change with widget tree shifts). Match by
+        // sprite ID first; fall back to name match.
+        try {
+            int textureId = w.getTextureId();
+            if (textureId == 564) return true;
+        } catch (Throwable ignored) {}
+
         // 1.9.65: dropped the 'getActions().contains("Cast")' requirement.
-        // User: 'we also still are not casting vengence correctly our
-        // original version just checked for the texture or something
-        // like that i think.' The Cast-action filter is fragile — on
-        // some game variants the right-click action set differs or
-        // doesn't include "Cast" until the icon is hovered. Just
-        // matching the spell NAME is enough; click("Cast") on a widget
-        // without that action will silently fall back to a left-click,
-        // and clicking the Vengeance Self icon by left-click also
-        // casts the spell.
+        // Some game variants only expose Cast on hover. Match by name.
         String combined = "";
         try { combined += " " + w.getName().orElse(""); } catch (Throwable ignored) {}
         combined += " " + w.getText().orElse("");
