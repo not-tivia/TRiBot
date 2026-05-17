@@ -1444,20 +1444,16 @@ public class Corp implements TribotScript {
                     Log.debug("Camera angle acceptable: " + currentAngle);
                 }
 
-                // 1.9.74: also enforce zoomed-out camera. User: 'every
-                // combat i have to manually zoom out more because our
-                // camera angle ends up too close.' TRiBot's mouse
-                // antiban or random scroll inputs can creep the zoom
-                // in over time. Force it back to a wide field of view
-                // periodically (same cadence as the angle check).
+                // 1.9.76.2: reset camera zoom on the check cadence. User
+                // hits manual zoom-out every combat because antiban /
+                // stray scroll creeps it in. Camera.resetZoomPercent()
+                // takes no args and bounces zoom back to the SDK default
+                // (wide field of view). We don't read the current zoom
+                // because the SDK's getZoomPercent signature varies
+                // across builds (Integer vs Optional<Integer>) and we
+                // don't need the value — just enforce default periodically.
                 try {
-                    int currentZoom = Camera.getZoomPercent();
-                    final int TARGET_ZOOM_PERCENT = 25; // wide view; lower = more zoomed out
-                    if (currentZoom > TARGET_ZOOM_PERCENT + 15) {
-                        Log.info("Camera zoom too close: " + currentZoom
-                                + "% - resetting to " + TARGET_ZOOM_PERCENT + "%");
-                        Camera.setZoomPercent(TARGET_ZOOM_PERCENT);
-                    }
+                    Camera.resetZoomPercent();
                 } catch (Throwable ignored) {}
             } catch (Exception e) {
                 Log.error("Error checking camera angle: " + e.getMessage());
