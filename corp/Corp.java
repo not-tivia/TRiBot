@@ -10984,15 +10984,18 @@ public class Corp implements TribotScript {
      *  Method order: LocalWalking.walkTo -> minimap click -> on-screen tile click.
      *  Minimap clicks bypass server-side path validation and are most reliable
      *  when our starting tile is technically inside an NPC's hitbox. */
-    /** 1.9.81: count walkable tiles in an 8x8 box centered on `tile`.
+    /** 1.9.82: count walkable tiles in a box centered on `tile`. Radius
+     *  was 4 in 1.9.81 — half that box overlapped Corp's own 5x5 hitbox
+     *  (which we exclude), so the score barely reflected actual room
+     *  openness. Bumped to 10 (21x21 box). The Corp cave is ~24 tiles
+     *  across so radius 10 covers most of it from any vantage point.
      *  Walkable = inside corpCave polygon AND outside Corp's hitbox.
-     *  Higher count means more open space on that side — preferred
-     *  escape direction. ~64 contains() calls per invocation, negligible
-     *  cost. */
+     *  ~441 contains() calls per invocation, 8 candidates = ~3500 ops.
+     *  Still cheap (microseconds). */
     private int openTileCountAround(WorldTile tile, Area corpArea) {
         if (tile == null) return 0;
         int count = 0;
-        int radius = 4;
+        int radius = 10;
         int tx = tile.getX(), ty = tile.getY(), tz = tile.getPlane();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dy = -radius; dy <= radius; dy++) {
