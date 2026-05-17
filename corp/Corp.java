@@ -11014,9 +11014,18 @@ public class Corp implements TribotScript {
         for (WorldTile candidate : candidates) {
             Log.warn("STOMP DEFENSE: stepping off to " + candidate);
 
-            // 1) Try LocalWalking first (fastest when it works).
+            // 1.9.79: dropped the isTileWalkable pre-filter. Same bug as
+            // 1.9.63's stepAwayFromCore: Query.tiles().isReachable()
+            // returns false for tiles 1 square from the player that are
+            // obviously walkable. User log: bot got stomped repeatedly,
+            // STOMP DEFENSE fired, every candidate failed isTileWalkable,
+            // bot stood in hitbox eating 30+ damage per tick until dead.
+            // Just try LocalWalking.walkTo directly; SDK returns false
+            // if it can't start the walk and we try the next candidate.
+
+            // 1) LocalWalking (fastest path when it works).
             try {
-                if (isTileWalkable(candidate) && LocalWalking.walkTo(candidate)) {
+                if (LocalWalking.walkTo(candidate)) {
                     if (waitForOutsideCorp(corpArea, 1500)) return true;
                 }
             } catch (Exception ignored) {}
