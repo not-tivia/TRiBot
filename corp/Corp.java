@@ -8295,26 +8295,30 @@ public class Corp implements TribotScript {
         boolean restorationPending = false;
         try { restorationPending = shouldStartRestorationCycle(); } catch (Exception ignored) {}
 
-        // 1.9.84: when restoration is pending AND HP isn't critical
-        // (<= INTERNAL_PANIC_TELE_HP = 25), skip BOTH combo eat AND
-        // normal eat. User: 'we are eating a lot vs just double specing
-        // and teleporting out.' Pre-1.9.84 the combo-eat path still
-        // fired at HP <= 50 during the brief window between deciding
-        // to restore and the state transition, costing 2-3 food items
-        // per restoration cycle. The pool at the POH restores HP to
-        // full, so any food eaten now is wasted. Only the true panic
-        // threshold (HP <= 25 = one Corp hit from death) still triggers
-        // emergency eating to survive the tele animation.
+        // 1.9.87: 'spec dump phase' = spec weapon equipped, not just
+        // 'restoration pending'. User: 'i feel like it was still eating
+        // when it should just be specing and teleporting out.' Log
+        // showed eating at 02:16:22 (between spec 1 and timed-out
+        // spec 2 — energy 50%, restorationPending = false because
+        // spec 2 was about to fire and reach 0%). The eat was wasteful
+        // because either spec 2 succeeds → tele soon → pool restores,
+        // or spec 2 times out → still going to tele eventually. Either
+        // way the eat gets overwritten.
+        //
+        // New rule: if spec weapon equipped, skip normal eat. Skip
+        // combo eat too unless HP is critical (<= panic-tele).
+        boolean inSpecDump = isSpecWeaponEquipped();
+        boolean shouldSkipEats = restorationPending || inSpecDump;
+
         if (currentHealth <= INTERNAL_PANIC_TELE_HP) {
-            // Critical — eat regardless of restoration intent.
             emergencyComboEat();
-        } else if (currentHealth <= INTERNAL_COMBO_EAT_HP && !restorationPending) {
+        } else if (currentHealth <= INTERNAL_COMBO_EAT_HP && !shouldSkipEats) {
             emergencyComboEat();
-        } else if (!restorationPending && currentHealth <= eatHealthThreshold()) {
+        } else if (!shouldSkipEats && currentHealth <= eatHealthThreshold()) {
             normalEat();
         }
 
-        if (!restorationPending && Prayer.getPrayerPoints() <= INTERNAL_DRINK_PRAYER_THRESHOLD) {
+        if (!shouldSkipEats && Prayer.getPrayerPoints() <= INTERNAL_DRINK_PRAYER_THRESHOLD) {
             drinkPrayerPotion();
         }
     }
