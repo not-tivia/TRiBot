@@ -1154,7 +1154,7 @@ public class Corp implements TribotScript {
     // 1.9.4: one Corp hit away from death. Below this we skip eating/swapping
     // and bail straight to EMERGENCY_ESCAPE (Ferox tele / Games necklace /
     // run-to-entrance / logout) — eating clearly isn't keeping up.
-    public static final int INTERNAL_PANIC_TELE_HP = 8;
+    public static final int INTERNAL_PANIC_TELE_HP = 25; // 1.9.70: 8 -> 25
     // 1.8.9: combo-eat (Shark + Karambwan) trigger. Corp hits hard enough that
     // normal-eating at maxHp-21 (~78) can't keep up — by the time the next
     // tick fires the bot is already taking another swing. Combo eat below 50
@@ -2635,37 +2635,47 @@ public class Corp implements TribotScript {
         maxCorpHpPercentThisKill = 0.0;
         corpSeenAtZeroHp = false;
 
-        // 1.9.16: kick off the walk FIRST, then do prep DURING the walk.
-        // OSRS walks are server-side: once we've issued the click on the
-        // passage, the player keeps walking even while we open inventory
-        // and click items. Pre-1.9.16 the order was prayer→pot→eat→equip
-        // →spec→veng (all blocking ~11s), THEN moveToCorpBossRoom — so
-        // none of the prep overlapped with the walk. User saw the bot
-        // stand in the lobby for 11s doing prep, then walk to Corp.
-        if (!isInCorpBossRoom()) {
-            Log.info("Kicking off walk to boss room (prep runs concurrently)");
-            moveToCorpBossRoom(); // fire-and-forget; we don't block on arrival
+        // 1.9.70: HP gate before walking into the boss room. Audit caught
+        // this — after a death respawn or a barely-survived previous fight
+        // the bot would walk in at 10-40 HP, take Corp's first magic+stomp
+        // before PfM activated, die. Now: if HP < 40, divert to
+        // BANKING_AND_HEALING for a quick Ferox pool drink. The pool
+        // restores to full and we re-enter at safe HP. This single fix
+        // probably eliminates the most common death cause we've seen.
+        if (MyPlayer.getCurrentHealth() < 40) {
+            Log.warn("Entering combat with HP " + MyPlayer.getCurrentHealth()
+                    + " < 40 — diverting to bank/pool before engaging");
+            currentState = BotState.BANKING_AND_HEALING;
+            return;
         }
 
-        // Now run the prep clicks. The walking server keeps the player
-        // moving across the passage while these run.
+        // 1.9.70: prayer ON before the walk, not after. Pre-1.9.70 we
+        // kicked off moveToCorpBossRoom THEN activated PfM — the walk
+        // starts immediately but PfM takes a tick to register, so Corp's
+        // first magic hit landed against unprotected HP. Now prayer
+        // setup happens FIRST, then the walk kicks off; PfM is live
+        // before we're in render range of Corp.
         if (!Prayer.isQuickPrayerEnabled()) {
             Log.info("Activating quick prayer (entering combat)");
             Prayer.enableQuickPrayer();
         }
-        // 1.9.52: also activate Protect from Magic NOW, before the walk
-        // to Corp. Pre-1.9.52 PfM only came on inside handleFightingCorp
-        // -> handleProtectionPrayers, which doesn't run until after
-        // positioning completes. User log: bot walked through Corp's
-        // hitbox eating stomp hits for 7 seconds before PfM activated;
-        // died on the next magic attack. PfM is a 1-prayer-tick toggle,
-        // safe to enable even if quick prayer already covered it.
         try {
             if (!Prayer.PROTECT_FROM_MAGIC.isEnabled()) {
                 Log.info("Activating Protect from Magic (entering combat)");
                 Prayer.PROTECT_FROM_MAGIC.enable();
             }
         } catch (Exception ignored) {}
+
+        // 1.9.16: kick off the walk FIRST, then do prep DURING the walk.
+        // OSRS walks are server-side: once we've issued the click on the
+        // passage, the player keeps walking even while we open inventory
+        // and click items.
+        // 1.9.70: but AFTER prayers, not before — see HP/prayer gate above.
+        if (!isInCorpBossRoom()) {
+            Log.info("Kicking off walk to boss room (prep runs concurrently)");
+            moveToCorpBossRoom(); // fire-and-forget; we don't block on arrival
+        }
+
         prepareSpecWeaponInLobby();
         // 1.9.17: removed veng cast from handleEnteringCombat. User said
         // "we still veng and do things we dont want to do until we actually
@@ -5472,12 +5482,21 @@ public class Corp implements TribotScript {
 
         // Eat shark
         Optional<InventoryItem> sharkOpt = Query.inventory().nameEquals("Shark").findFirst();
+        boolean ateShark = false;
         if (sharkOpt.isPresent()) {
             sharkOpt.get().click("Eat");
             Log.info("Emergency: Ate Shark while moving");
+            ateShark = true;
         }
 
-        // Immediately eat karambwan (no delay)
+        // 1.9.70: small delay between shark and karambwan so BOTH clicks
+        // register. Pre-1.9.70 they fired in the same tick and only the
+        // karambwan click landed — bot ate ~16 HP instead of ~38 HP and
+        // died to subsequent stomp/jump. The non-moving emergencyComboEat
+        // (line ~8103) already has this delay; this one didn't.
+        if (ateShark) {
+            Waiting.waitUniform(40, 80);
+        }
         Optional<InventoryItem> karambwanOpt = Query.inventory().nameEquals("Cooked karambwan").findFirst();
         if (karambwanOpt.isPresent()) {
             karambwanOpt.get().click("Eat");
@@ -5485,7 +5504,7 @@ public class Corp implements TribotScript {
             return true;
         }
 
-        return false;
+        return ateShark;
     }
 
     private boolean drinkPrayerPotionDuringMovement() {
