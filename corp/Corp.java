@@ -5116,37 +5116,20 @@ public class Corp implements TribotScript {
      * Cast the vengeance spell
      */
     private boolean castVengeance() {
-        // 1.9.74: try Magic.cast("Vengeance") FIRST — it's the SDK's
-        // dedicated spell-cast helper, much more reliable than hunting
-        // for widgets by name. User: 'veng isnt working still. How did
-        // our original version handle vengence?' Original was probably
-        // texture-ID based or used the SDK's Magic class. We'll use
-        // Magic.cast and fall back to the widget hunt if it fails.
+        // 1.9.76.1: widget-click via sprite ID 564 (Vengeance Self). Was
+        // briefly using Magic.cast("Vengeance") but the SDK signature
+        // is cast(int, Magic.SpellBook) not cast(String) — compile fail.
+        // Sprite ID match (1.9.75) is the canonical identifier anyway.
         long before = System.currentTimeMillis();
-        try {
-            Log.info("Casting Vengeance via Magic.cast('Vengeance')");
-            boolean ok = Magic.cast("Vengeance");
-            if (ok) {
-                Log.info("Magic.cast returned true");
-                lastVengeanceCast = before;
-                hasUsedVengeanceThisTrip = true;
-                vengeanceQueued = false;
-                return true;
-            }
-            Log.info("Magic.cast returned false — falling back to widget click");
-        } catch (Throwable t) {
-            Log.warn("Magic.cast threw: " + t.getMessage() + " — falling back to widget click");
-        }
-
         try {
             castVengeanceWidget(142);
             lastVengeanceCast = before;
             hasUsedVengeanceThisTrip = true;
             vengeanceQueued = false;
-            Log.info("Vengeance cast via widget fallback");
+            Log.info("Vengeance cast via widget (sprite 564)");
             return true;
         } catch (Exception e) {
-            Log.error("Vengeance casting failed (both paths): " + e.getMessage());
+            Log.error("Vengeance casting failed: " + e.getMessage());
             return false;
         }
     }
@@ -10134,6 +10117,18 @@ public class Corp implements TribotScript {
         public int coordinatorWriteIntervalTicks = 5;
         public int coordinatorStaleThresholdMs = 10_000;
 
+        // 1.9.76: port-based coordinator (replaces / supplements file).
+        // When useCoordinatorPort = true, host bot opens a TCP server on
+        // port (45000 + coordinatorPortId), client bots connect and
+        // exchange AccountSnapshots in real time. File coordinator is
+        // still written as a backup. coordinatorPortId 1-99, host IP
+        // defaults to 127.0.0.1 (same machine); set to public IP +
+        // port-forward 45000+ID for multi-machine.
+        public boolean useCoordinatorPort = false;
+        public boolean coordinatorIsHost = false;
+        public int coordinatorPortId = 1;
+        public String coordinatorHostIp = "127.0.0.1";
+
         // ===== Multi-phase spec targets (Phase B) =====
         // Phase 1: total DWH+Elder maul specs across the bot team before moving on.
         public int phase1TargetSpecs = 4;
@@ -10278,8 +10273,289 @@ public class Corp implements TribotScript {
         }
     }
 
+    /** 1.9.76: TCP-based coordinator transport. One bot per team runs in
+     *  HOST mode (opens ServerSocket on port 45000 + portId). Other bots
+     *  run as CLIENTs (connect to host:port). Both send their own
+     *  AccountSnapshot, both receive the aggregated TeamState. Same
+     *  publish()/read() API as the file CorpCoordinator so the calling
+     *  code doesn't change.
+     *
+     *  Protocol: newline-delimited JSON. Each line is either:
+     *    - From client: a JSON-serialized AccountSnapshot (the client's own)
+     *    - From host:   a JSON-serialized TeamState (the aggregate)
+     *
+     *  The host also writes to the file coordinator as a backup so a
+     *  restarted host can recover the latest known state.
+     */
+    private static class CorpPortCoordinator {
+        private final int port;
+        private final boolean isHost;
+        private final String hostIp;
+        private final long staleThresholdMs;
+        private final CorpCoordinator fileBackup; // host writes through to file
+
+        private volatile TeamState latestState = new TeamState();
+        private final Object stateLock = new Object();
+
+        // HOST: server socket + per-client handlers
+        private java.net.ServerSocket serverSocket;
+        private final java.util.List<java.net.Socket> clientSockets =
+                java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+
+        // CLIENT: connection to host
+        private java.net.Socket clientSocket;
+        private java.io.BufferedWriter clientWriter;
+        private java.io.BufferedReader clientReader;
+
+        private final com.google.gson.Gson gson = new com.google.gson.Gson();
+        private volatile boolean running = true;
+
+        CorpPortCoordinator(boolean isHost, String hostIp, int portId,
+                            long staleThresholdMs, CorpCoordinator fileBackup) {
+            this.isHost = isHost;
+            this.hostIp = hostIp;
+            this.port = 45000 + portId;
+            this.staleThresholdMs = staleThresholdMs;
+            this.fileBackup = fileBackup;
+            start();
+        }
+
+        private void start() {
+            if (isHost) startHost();
+            else startClient();
+        }
+
+        private void startHost() {
+            Thread t = new Thread(() -> {
+                try {
+                    serverSocket = new java.net.ServerSocket(port);
+                    Log.info("[Coord/HOST] Listening on port " + port);
+                    while (running) {
+                        try {
+                            java.net.Socket sock = serverSocket.accept();
+                            clientSockets.add(sock);
+                            Log.info("[Coord/HOST] Client connected: "
+                                    + sock.getRemoteSocketAddress());
+                            handleClient(sock);
+                        } catch (Exception e) {
+                            if (running) Log.warn("[Coord/HOST] accept error: " + e.getMessage());
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.warn("[Coord/HOST] startup failed: " + e.getMessage());
+                }
+            }, "corp-coord-host");
+            t.setDaemon(true);
+            t.start();
+        }
+
+        private void handleClient(java.net.Socket sock) {
+            Thread t = new Thread(() -> {
+                try {
+                    java.io.BufferedReader in = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(sock.getInputStream(),
+                                    java.nio.charset.StandardCharsets.UTF_8));
+                    String line;
+                    while (running && (line = in.readLine()) != null) {
+                        try {
+                            // Client message format: {"name":"...","snapshot":{...},"killId":N}
+                            ClientMessage msg = gson.fromJson(line, ClientMessage.class);
+                            if (msg != null && msg.name != null && msg.snapshot != null) {
+                                synchronized (stateLock) {
+                                    if (latestState.accounts == null) {
+                                        latestState.accounts = new LinkedHashMap<>();
+                                    }
+                                    if (msg.killId > latestState.killId) {
+                                        latestState.killId = msg.killId;
+                                        latestState.killStartedAt = System.currentTimeMillis();
+                                        for (AccountSnapshot a : latestState.accounts.values()) {
+                                            a.specsThisKill = new LinkedHashMap<>();
+                                            a.bgsDamageDealt = 0;
+                                        }
+                                    }
+                                    msg.snapshot.lastUpdate = System.currentTimeMillis();
+                                    latestState.accounts.put(msg.name, msg.snapshot);
+                                }
+                                broadcastState();
+                            }
+                        } catch (Exception e) {
+                            Log.warn("[Coord/HOST] parse error: " + e.getMessage());
+                        }
+                    }
+                } catch (Exception e) {
+                    // disconnect — normal
+                } finally {
+                    clientSockets.remove(sock);
+                    try { sock.close(); } catch (Exception ignored) {}
+                }
+            }, "corp-coord-client-handler");
+            t.setDaemon(true);
+            t.start();
+        }
+
+        private void broadcastState() {
+            String json;
+            synchronized (stateLock) {
+                json = gson.toJson(latestState);
+            }
+            String line = json + "\n";
+            byte[] bytes = line.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            synchronized (clientSockets) {
+                java.util.Iterator<java.net.Socket> it = clientSockets.iterator();
+                while (it.hasNext()) {
+                    java.net.Socket s = it.next();
+                    try {
+                        s.getOutputStream().write(bytes);
+                        s.getOutputStream().flush();
+                    } catch (Exception e) {
+                        it.remove();
+                        try { s.close(); } catch (Exception ignored) {}
+                    }
+                }
+            }
+            // Mirror to file backup so a host restart can recover state.
+            if (fileBackup != null) {
+                try {
+                    synchronized (stateLock) {
+                        for (Map.Entry<String, AccountSnapshot> e : latestState.accounts.entrySet()) {
+                            fileBackup.publish(e.getKey(), e.getValue(),
+                                    latestState.killId, latestState.accounts.keySet());
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+        }
+
+        private void startClient() {
+            Thread t = new Thread(() -> {
+                while (running) {
+                    try {
+                        clientSocket = new java.net.Socket(hostIp, port);
+                        clientWriter = new java.io.BufferedWriter(
+                                new java.io.OutputStreamWriter(clientSocket.getOutputStream(),
+                                        java.nio.charset.StandardCharsets.UTF_8));
+                        clientReader = new java.io.BufferedReader(
+                                new java.io.InputStreamReader(clientSocket.getInputStream(),
+                                        java.nio.charset.StandardCharsets.UTF_8));
+                        Log.info("[Coord/CLIENT] Connected to " + hostIp + ":" + port);
+                        // Reader loop: receive aggregated state from host.
+                        String line;
+                        while (running && (line = clientReader.readLine()) != null) {
+                            try {
+                                TeamState ts = gson.fromJson(line, TeamState.class);
+                                if (ts != null) {
+                                    synchronized (stateLock) { latestState = ts; }
+                                }
+                            } catch (Exception ignored) {}
+                        }
+                    } catch (Exception e) {
+                        Log.warn("[Coord/CLIENT] connection error: " + e.getMessage()
+                                + " — reconnecting in 5s");
+                    }
+                    // Close and back off before reconnect.
+                    try { if (clientSocket != null) clientSocket.close(); } catch (Exception ignored) {}
+                    clientWriter = null;
+                    clientReader = null;
+                    try { Thread.sleep(5000); } catch (InterruptedException ie) { break; }
+                }
+            }, "corp-coord-client");
+            t.setDaemon(true);
+            t.start();
+        }
+
+        synchronized TeamState read() {
+            synchronized (stateLock) {
+                // Return a defensive copy via gson roundtrip — caller may mutate.
+                return gson.fromJson(gson.toJson(latestState), TeamState.class);
+            }
+        }
+
+        synchronized void publish(String accountName, AccountSnapshot snap,
+                                  long killId, Set<String> liveBots) {
+            snap.lastUpdate = System.currentTimeMillis();
+            if (isHost) {
+                // Host: write directly into local state, then broadcast.
+                synchronized (stateLock) {
+                    if (latestState.accounts == null) {
+                        latestState.accounts = new LinkedHashMap<>();
+                    }
+                    if (killId > latestState.killId) {
+                        latestState.killId = killId;
+                        latestState.killStartedAt = System.currentTimeMillis();
+                        for (AccountSnapshot a : latestState.accounts.values()) {
+                            a.specsThisKill = new LinkedHashMap<>();
+                            a.bgsDamageDealt = 0;
+                        }
+                    }
+                    latestState.accounts.put(accountName, snap);
+                    if (liveBots != null && !liveBots.isEmpty()) {
+                        latestState.accounts.keySet().retainAll(liveBots);
+                    }
+                }
+                broadcastState();
+            } else {
+                // Client: send to host.
+                if (clientWriter == null) return; // not connected yet; reader thread will reconnect
+                ClientMessage msg = new ClientMessage();
+                msg.name = accountName;
+                msg.snapshot = snap;
+                msg.killId = killId;
+                try {
+                    clientWriter.write(gson.toJson(msg));
+                    clientWriter.write("\n");
+                    clientWriter.flush();
+                } catch (Exception e) {
+                    Log.warn("[Coord/CLIENT] write failed: " + e.getMessage());
+                    try { clientSocket.close(); } catch (Exception ignored) {}
+                }
+            }
+        }
+
+        TeamAggregate aggregate(TeamState state) {
+            TeamAggregate a = new TeamAggregate();
+            if (state == null || state.accounts == null) return a;
+            long now = System.currentTimeMillis();
+            for (AccountSnapshot snap : state.accounts.values()) {
+                if (now - snap.lastUpdate > staleThresholdMs) continue;
+                a.liveAccounts++;
+                a.phase3BgsDamage += snap.bgsDamageDealt;
+                if (snap.bgsDamageDealt > 0) a.anyTeamDamage = true;
+                if (snap.specsThisKill != null) {
+                    for (Map.Entry<String, Integer> e : snap.specsThisKill.entrySet()) {
+                        Integer phase = SPEC_PHASE.get(e.getKey());
+                        if (phase == null) continue;
+                        if (e.getValue() > 0) a.anyTeamDamage = true;
+                        if (phase == 1) a.phase1Specs += e.getValue();
+                        else if (phase == 2) a.phase2Specs += e.getValue();
+                    }
+                }
+            }
+            return a;
+        }
+
+        void shutdown() {
+            running = false;
+            try { if (serverSocket != null) serverSocket.close(); } catch (Exception ignored) {}
+            try { if (clientSocket != null) clientSocket.close(); } catch (Exception ignored) {}
+            synchronized (clientSockets) {
+                for (java.net.Socket s : clientSockets) {
+                    try { s.close(); } catch (Exception ignored) {}
+                }
+                clientSockets.clear();
+            }
+        }
+
+        /** Wire-format wrapper for a client → host snapshot push. */
+        private static class ClientMessage {
+            String name;
+            AccountSnapshot snapshot;
+            long killId;
+        }
+    }
+
     // Runtime coordinator state (only used when settings.coordinatorEnabled).
     private CorpCoordinator coordinator;
+    private CorpPortCoordinator portCoordinator; // 1.9.76: nullable
     private long localKillId = 0;
     private int coordTickCounter = 0;
     private final AccountSnapshot mySnapshot = new AccountSnapshot();
@@ -10291,6 +10567,24 @@ public class Corp implements TribotScript {
             if (!dir.exists()) dir.mkdirs();
             coordinator = new CorpCoordinator(new java.io.File(dir, "corp_team_state.json"),
                     INTERNAL_COORD_STALE_THRESHOLD_MS);
+            // 1.9.76: also spin up port coordinator if enabled.
+            if (settings.useCoordinatorPort && portCoordinator == null) {
+                try {
+                    portCoordinator = new CorpPortCoordinator(
+                            settings.coordinatorIsHost,
+                            settings.coordinatorHostIp,
+                            settings.coordinatorPortId,
+                            INTERNAL_COORD_STALE_THRESHOLD_MS,
+                            settings.coordinatorIsHost ? coordinator : null);
+                    Log.info("Port coordinator started: "
+                            + (settings.coordinatorIsHost ? "HOST" : "CLIENT")
+                            + " on " + settings.coordinatorHostIp
+                            + ":" + (45000 + settings.coordinatorPortId));
+                } catch (Exception e) {
+                    Log.warn("Port coordinator init failed: " + e.getMessage()
+                            + " — falling back to file-only");
+                }
+            }
         } catch (Exception e) {
             Log.error("Failed to init coordinator: " + e.getMessage());
         }
@@ -10320,6 +10614,11 @@ public class Corp implements TribotScript {
         if (settings.botTeammates != null) live.addAll(settings.botTeammates);
         live.add(name);  // always include ourselves
 
+        // 1.9.76: publish to port coordinator (if active), file always.
+        if (portCoordinator != null) {
+            try { portCoordinator.publish(name, mySnapshot, localKillId, live); }
+            catch (Exception e) { Log.warn("Port publish failed: " + e.getMessage()); }
+        }
         coordinator.publish(name, mySnapshot, localKillId, live);
     }
 
@@ -10328,6 +10627,17 @@ public class Corp implements TribotScript {
         if (!settings.coordinatorEnabled) return null;
         ensureCoordinator();
         if (coordinator == null) return null;
+        // 1.9.76: prefer port coordinator's in-memory state when active —
+        // it's real-time. File read is the fallback if port is off or
+        // hasn't received any state yet.
+        if (portCoordinator != null) {
+            try {
+                TeamState ts = portCoordinator.read();
+                if (ts != null && ts.accounts != null && !ts.accounts.isEmpty()) {
+                    return portCoordinator.aggregate(ts);
+                }
+            } catch (Exception ignored) {}
+        }
         return coordinator.aggregate(coordinator.read());
     }
 
