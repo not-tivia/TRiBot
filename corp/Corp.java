@@ -7485,13 +7485,8 @@ public class Corp implements TribotScript {
         singles.put(RUNE_POUCH, 1);
         singles.put(DIVINE_RUNE_POUCH, 1);
         for (String d : DEFENDER_PRIORITY) singles.put(d, 1);
-        for (int dose = 8; dose >= 1; dose -= 2) singles.put("Ring of dueling(" + dose + ")", 1);
-        for (int dose = 8; dose >= 1; dose -= 2) singles.put("Games necklace(" + dose + ")", 1);
         // 1.9.60: do NOT cap "Teleport to house" tabs — user does multiple
-        // POH cycles per kill and needs the stack to survive. User:
-        // 'when we bank we put away all our house tabs except one. thats
-        // unintended. we need multiple.' Cape variants stay capped at 1
-        // (only one can be equipped at a time anyway).
+        // POH cycles per kill and needs the stack to survive.
         singles.put("Construct. cape", 1);
         singles.put("Construct. cape(t)", 1);
 
@@ -7507,6 +7502,55 @@ public class Corp implements TribotScript {
                 Waiting.waitNormal(250, 80);
             }
         }
+
+        // 1.9.71: charged jewelry — keep ONLY the highest-dose one of each
+        // kind. User: 'each time we bank we pull out new things we dont
+        // need. like currently i have 3 rings of dueling and 3 games
+        // necklace.' Pre-1.9.71 the deposit table keyed each dose
+        // separately ('Ring of dueling(8)', 'Ring of dueling(6)', ...)
+        // so a (8), (5), and (3) all looked like unique items and none
+        // got deposited. Now we find the highest dose present and
+        // deposit every lower dose of the same item.
+        depositLowerDoseJewelry("Ring of dueling");
+        depositLowerDoseJewelry("Games necklace");
+    }
+
+    /** 1.9.71: deposit every dose of the named charged item except the
+     *  highest one currently in inventory. */
+    private void depositLowerDoseJewelry(String baseName) {
+        int highestDose = -1;
+        for (int dose = 8; dose >= 1; dose--) {
+            String name = baseName + "(" + dose + ")";
+            try {
+                if (Inventory.getCount(name) > 0) {
+                    highestDose = dose;
+                    break;
+                }
+            } catch (Exception ignored) {}
+        }
+        if (highestDose < 0) return;
+        for (int dose = 1; dose < highestDose; dose++) {
+            String name = baseName + "(" + dose + ")";
+            try {
+                int n = Inventory.getCount(name);
+                if (n > 0) {
+                    Log.info("Banking: depositing " + n + " " + name
+                            + " (keeping highest dose " + baseName + "(" + highestDose + "))");
+                    Bank.deposit(name, n);
+                    Waiting.waitNormal(250, 80);
+                }
+            } catch (Exception ignored) {}
+        }
+        // Also deposit any extras of the highest-dose itself (>1).
+        String highest = baseName + "(" + highestDose + ")";
+        try {
+            int n = Inventory.getCount(highest);
+            if (n > 1) {
+                Log.info("Banking: depositing " + (n - 1) + " excess " + highest);
+                Bank.deposit(highest, n - 1);
+                Waiting.waitNormal(250, 80);
+            }
+        } catch (Exception ignored) {}
     }
 
 	private boolean withdrawBankingItems() {
@@ -9567,25 +9611,33 @@ public class Corp implements TribotScript {
 		// Fallback: Type host's name manually
 		Log.info("No widget shortcut found, attempting to type host name: " + hostName);
 
-		// 1.9.21: HARD safety gate before typing. Pre-1.9.21 we trusted
-		// Chatbox.isOpen() but that returns true for ANY chat window —
-		// including the public chat input. Production log showed the bot
-		// typing "TimeToAFK" into PUBLIC CHAT after a state transition
-		// closed the friend-house dialog. That's a major detection
-		// vector. Now we require the friend-house input widget
-		// [162, 44] to be present AND visible before typing — if not,
-		// abort, don't type anything.
-		Optional<Widget> inputFieldOpt = Query.widgets()
+		// 1.9.71: safety gate by TEXT content, not IndexPath. User: 'the
+		// issue is now if we dont have the friends name then we dont
+		// type it in.' The IndexPath check at [162, 44] failed to match
+		// in this SDK (same reason as 1.9.55 / 1.9.42's dialog-open
+		// fixes), so the bot refused to type even when the dialog was
+		// clearly open. Now: confirm the dialog is open by searching
+		// for the "Enter name:" prompt or "Last name:" shortcut text
+		// under root 162. Either being present proves we're on the
+		// friend-house dialog (not public chat — public chat doesn't
+		// have those labels), safe to type.
+		boolean dialogOpen = Query.widgets()
 				.inRoots(162)
-				.filter(w -> w.getIndexPath().length == 2
-						&& w.getIndexPath()[1] == 44)
-				.findFirst();
-		if (!inputFieldOpt.isPresent()) {
-			Log.warn("Friend-house input widget [162, 44] not present — "
-					+ "refusing to type (would risk typing into public chat)");
+				.filter(w -> {
+					String raw = w.getText().orElse("");
+					if (raw.isEmpty()) return false;
+					String clean = raw.replaceAll("<[^>]*>", "").toLowerCase();
+					return clean.contains("enter name")
+							|| clean.contains("last name");
+				})
+				.findFirst()
+				.isPresent();
+		if (!dialogOpen) {
+			Log.warn("Friend-house dialog not open (no 'Enter name:' / "
+					+ "'Last name:' text under root 162) — refusing to type");
 			return false;
 		}
-		Log.info("Verified friend-house input widget present, typing now");
+		Log.info("Verified friend-house dialog open by text, typing now");
 
 		// 1.9.41.1: 3-5 second dialog wait, NOT 5 minutes — user clarified
 		// "we want to wait no more than 3-5 SECONDS." The teleport drops
