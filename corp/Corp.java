@@ -10984,6 +10984,27 @@ public class Corp implements TribotScript {
      *  Method order: LocalWalking.walkTo -> minimap click -> on-screen tile click.
      *  Minimap clicks bypass server-side path validation and are most reliable
      *  when our starting tile is technically inside an NPC's hitbox. */
+    /** 1.9.81: count walkable tiles in an 8x8 box centered on `tile`.
+     *  Walkable = inside corpCave polygon AND outside Corp's hitbox.
+     *  Higher count means more open space on that side — preferred
+     *  escape direction. ~64 contains() calls per invocation, negligible
+     *  cost. */
+    private int openTileCountAround(WorldTile tile, Area corpArea) {
+        if (tile == null) return 0;
+        int count = 0;
+        int radius = 4;
+        int tx = tile.getX(), ty = tile.getY(), tz = tile.getPlane();
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -radius; dy <= radius; dy++) {
+                WorldTile t = new WorldTile(tx + dx, ty + dy, tz);
+                if (!corpCave.contains(t)) continue;
+                if (corpArea != null && corpArea.contains(t)) continue;
+                count++;
+            }
+        }
+        return count;
+    }
+
     private boolean stepOffCorp(Npc corp) {
         WorldTile myPos = MyPlayer.getTile();
         if (myPos == null || corp == null) return false;
@@ -11009,6 +11030,21 @@ public class Corp implements TribotScript {
                 if (!corpArea.contains(c)) candidates.add(c);
             }
         }
+
+        // 1.9.81: rank candidates by OPENNESS — how many walkable tiles
+        // exist in an 8x8 box around each candidate. User: 'we can check
+        // which tiles have the most space between corp and walls ... so
+        // that we prioritize tiles that have more walkable tiles in that
+        // direction. that means if the corp is camping the door, we will
+        // just run through him to the other side of him because the
+        // entire room is full of open walkable tiles.' This biases
+        // escape toward the open interior of the room rather than
+        // toward the entrance corner where Corp loves to camp.
+        candidates.sort((a, b) -> {
+            int aScore = openTileCountAround(a, corpArea);
+            int bScore = openTileCountAround(b, corpArea);
+            return Integer.compare(bScore, aScore); // descending
+        });
 
         for (WorldTile candidate : candidates) {
             // 1.9.80: check the cave polygon bounds, NOT the broken
