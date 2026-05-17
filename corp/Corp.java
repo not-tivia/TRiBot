@@ -8251,7 +8251,20 @@ public class Corp implements TribotScript {
         boolean restorationPending = false;
         try { restorationPending = shouldStartRestorationCycle(); } catch (Exception ignored) {}
 
-        if (currentHealth <= INTERNAL_COMBO_EAT_HP) {
+        // 1.9.84: when restoration is pending AND HP isn't critical
+        // (<= INTERNAL_PANIC_TELE_HP = 25), skip BOTH combo eat AND
+        // normal eat. User: 'we are eating a lot vs just double specing
+        // and teleporting out.' Pre-1.9.84 the combo-eat path still
+        // fired at HP <= 50 during the brief window between deciding
+        // to restore and the state transition, costing 2-3 food items
+        // per restoration cycle. The pool at the POH restores HP to
+        // full, so any food eaten now is wasted. Only the true panic
+        // threshold (HP <= 25 = one Corp hit from death) still triggers
+        // emergency eating to survive the tele animation.
+        if (currentHealth <= INTERNAL_PANIC_TELE_HP) {
+            // Critical — eat regardless of restoration intent.
+            emergencyComboEat();
+        } else if (currentHealth <= INTERNAL_COMBO_EAT_HP && !restorationPending) {
             emergencyComboEat();
         } else if (!restorationPending && currentHealth <= eatHealthThreshold()) {
             normalEat();
