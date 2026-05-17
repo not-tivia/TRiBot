@@ -2427,6 +2427,12 @@ public class Corp implements TribotScript {
         // searching for the standard 'Bank of RuneScape' / 'The Bank'
         // header text under any chatbox/bank-related root — visible
         // when the bank interface is up.
+        // 1.9.88: tighter widget-text match — 'search:' was matching
+        // unrelated UIs (spellbook filter, world map, etc.). User log:
+        // bot drank pool then went straight to 'Starting banking
+        // withdrawal' with no bank chest click, then withdraw failed
+        // and script stopped. Now require the specific 'bank of
+        // runescape' header text only.
         boolean bankActuallyOpen;
         try {
             bankActuallyOpen = Bank.isOpen()
@@ -2436,12 +2442,7 @@ public class Corp implements TribotScript {
                             if (raw.isEmpty()) return false;
                             String clean = raw.replaceAll("<[^>]*>", "")
                                     .trim().toLowerCase();
-                            return clean.startsWith("the bank of runescape")
-                                    || clean.startsWith("bank of runescape")
-                                    || clean.equals("rearrange mode")
-                                    || clean.startsWith("search:")
-                                    || clean.startsWith("deposit inventory")
-                                    || clean.startsWith("deposit worn");
+                            return clean.contains("bank of runescape");
                         })
                         .findFirst()
                         .isPresent();
@@ -2507,14 +2508,35 @@ public class Corp implements TribotScript {
             if (hasMinimumSupplies()) {
                 Log.warn("Continuing with minimum supplies");
             } else {
-                Log.error("Insufficient supplies in bank - STOPPING SCRIPT");
-                // Signal teammates first so coordinator-aware bots wrap up,
-                // then hard-stop ourselves. Login.logout() alone doesn't exit
-                // the main loop — running must flip to false.
-                signalSessionEnd("Bank out of supplies during banking trip");
-                running = false;
-                Login.logout();
-                return; // Exit the method completely
+                // 1.9.88: don't auto-logout on first failure. User log:
+                // bot drank pool, banking withdrawal called WITHOUT
+                // first opening the bank (false-positive bank-open
+                // check), Bank.withdraw returned false on all items,
+                // script declared "insufficient supplies" and logged
+                // out — but bank actually had supplies. Now: log a
+                // diagnostic with bank counts, then RETURN (don't
+                // stop). Next handleBankingAndHealing tick will retry
+                // the open + withdraw. Only stop if the failure
+                // persists across multiple consecutive ticks (handled
+                // elsewhere by tripFailureStrikes — TODO future fix).
+                int sharks = 0, karambwans = 0, ringDose = 0;
+                try {
+                    sharks = Bank.getCount("Shark");
+                    karambwans = Bank.getCount("Cooked karambwan");
+                    for (int d = 8; d >= 1; d--) {
+                        if (Bank.getCount("Ring of dueling(" + d + ")") > 0) {
+                            ringDose = d;
+                            break;
+                        }
+                    }
+                } catch (Exception ignored) {}
+                Log.warn("Banking withdrawal failed. Bank counts: "
+                        + "Shark=" + sharks + ", Karambwan=" + karambwans
+                        + ", Ring=" + ringDose + " (will retry next tick)");
+                // Close the bank UI if it's still open so the retry
+                // starts clean.
+                try { if (Bank.isOpen()) Bank.close(); } catch (Exception ignored) {}
+                return;
             }
         }
 
