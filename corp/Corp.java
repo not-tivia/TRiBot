@@ -2427,31 +2427,12 @@ public class Corp implements TribotScript {
         // searching for the standard 'Bank of RuneScape' / 'The Bank'
         // header text under any chatbox/bank-related root — visible
         // when the bank interface is up.
-        // 1.9.88: tighter widget-text match — 'search:' was matching
-        // unrelated UIs (spellbook filter, world map, etc.). User log:
-        // bot drank pool then went straight to 'Starting banking
-        // withdrawal' with no bank chest click, then withdraw failed
-        // and script stopped. Now require the specific 'bank of
-        // runescape' header text only.
-        boolean bankActuallyOpen;
-        try {
-            bankActuallyOpen = Bank.isOpen()
-                    || Query.widgets()
-                        .filter(w -> {
-                            String raw = w.getText().orElse("");
-                            if (raw.isEmpty()) return false;
-                            String clean = raw.replaceAll("<[^>]*>", "")
-                                    .trim().toLowerCase();
-                            return clean.contains("bank of runescape");
-                        })
-                        .findFirst()
-                        .isPresent();
-        } catch (Exception e) {
-            bankActuallyOpen = Bank.isOpen();
-        }
-
+        // 1.9.89: reverted to Bank.isOpen() alone. User: 'Bank.isOpen
+        // usually works pretty well.' The 1.9.86/1.9.88 widget-text
+        // fallback was adding false-positive 'bank is open' paths
+        // that skipped the chest-click step when they shouldn't have.
         // Step 4: Open bank
-        if (!bankActuallyOpen) {
+        if (!Bank.isOpen()) {
             // 1.9.14: settle delay before clicking the bank chest.
             Waiting.waitNormal(700, 200);
             // Try to find and left-click bank chest specifically
