@@ -6120,6 +6120,21 @@ public class Corp implements TribotScript {
      */
     private boolean isInGoodCorpPosition(Npc corp) {
         WorldTile myPos = MyPlayer.getTile();
+        // 1.9.83: HARD reject if we're INSIDE Corp's hitbox. Pre-1.9.83
+        // a player at (cx-2, cy) (inside the 5x5 hitbox) was distance 1
+        // from the canonical (cx-3, cy) and the function returned true
+        // — bot thought it was already 'positioned' and skipped the
+        // move, engaging from inside the hitbox eating free stomp
+        // damage every tick. User's recent death log showed exactly
+        // this — no 'Moved to assigned Corp position' fired before
+        // STOMP DEFENSE started spinning.
+        try {
+            Area corpArea = corp.getArea();
+            if (corpArea != null && myPos != null && corpArea.contains(myPos)) {
+                return false; // inside hitbox = NOT a good position
+            }
+        } catch (Exception ignored) {}
+
         List<WorldTile> dynamicPositions = getDynamicCorpPositions(corp);
 
         return dynamicPositions.stream()
