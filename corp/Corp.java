@@ -3647,17 +3647,16 @@ public class Corp implements TribotScript {
                 { sx, 0 }, { 0, sy }, { -sx, 0 }, { 0, -sy }
         };
 
-        // 1.9.63: dropped the isTileWalkable pre-filter. Query.tiles()
-        // .isReachable() was filtering out EVERY candidate including
-        // tiles 1-2 squares from the player that are clearly walkable.
-        // User log: bot stuck looping 'no walkable target' -> emergency
-        // eat -> core lands -> eat -> ... until food ran out and died.
-        // Now just try LocalWalking.walkTo on each candidate directly.
-        // SDK returns false if not walkable; loop tries the next.
+        // 1.9.63: dropped the broken isReachable pre-filter.
+        // 1.9.80: but added corpCave polygon check so we don't try
+        // walking into walls. User: 'we need to have the tile be
+        // walkable or else we will try to run into walls.' Cave
+        // polygon defines the playable interior; outside = wall.
         for (int[] o : offsets) {
             if (o[0] == 0 && o[1] == 0) continue;
             WorldTile target = new WorldTile(myPos.getX() + o[0], myPos.getY() + o[1], myPos.getPlane());
             if (corpArea != null && corpArea.contains(target)) continue; // inside Corp = stomp damage
+            if (!corpCave.contains(target)) continue; // outside cave polygon = wall
             try {
                 if (LocalWalking.walkTo(target)) {
                     Log.info("STEP-AWAY: moving to " + target);
@@ -11012,16 +11011,20 @@ public class Corp implements TribotScript {
         }
 
         for (WorldTile candidate : candidates) {
+            // 1.9.80: check the cave polygon bounds, NOT the broken
+            // Query.tiles().isReachable(). Pre-1.9.80 had no check
+            // (bot would attempt walks into walls); pre-1.9.79 had the
+            // isReachable check that false-negatived walkable tiles.
+            // Solution: use corpCave.contains() as the wall guard —
+            // tile inside the cave polygon AND outside Corp's hitbox
+            // = guaranteed walkable. Tiles outside the polygon are
+            // walls / out-of-bounds.
+            if (!corpCave.contains(candidate)) {
+                Log.debug("STOMP DEFENSE: skipping " + candidate
+                        + " — outside corpCave polygon (wall)");
+                continue;
+            }
             Log.warn("STOMP DEFENSE: stepping off to " + candidate);
-
-            // 1.9.79: dropped the isTileWalkable pre-filter. Same bug as
-            // 1.9.63's stepAwayFromCore: Query.tiles().isReachable()
-            // returns false for tiles 1 square from the player that are
-            // obviously walkable. User log: bot got stomped repeatedly,
-            // STOMP DEFENSE fired, every candidate failed isTileWalkable,
-            // bot stood in hitbox eating 30+ damage per tick until dead.
-            // Just try LocalWalking.walkTo directly; SDK returns false
-            // if it can't start the walk and we try the next candidate.
 
             // 1) LocalWalking (fastest path when it works).
             try {
