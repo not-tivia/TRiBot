@@ -1444,17 +1444,11 @@ public class Corp implements TribotScript {
                     Log.debug("Camera angle acceptable: " + currentAngle);
                 }
 
-                // 1.9.76.2: reset camera zoom on the check cadence. User
-                // hits manual zoom-out every combat because antiban /
-                // stray scroll creeps it in. Camera.resetZoomPercent()
-                // takes no args and bounces zoom back to the SDK default
-                // (wide field of view). We don't read the current zoom
-                // because the SDK's getZoomPercent signature varies
-                // across builds (Integer vs Optional<Integer>) and we
-                // don't need the value — just enforce default periodically.
-                try {
-                    Camera.resetZoomPercent();
-                } catch (Throwable ignored) {}
+                // 1.9.77.1: removed Camera.resetZoomPercent. User reset is
+                // the WRONG direction (default is zoomed IN, user wants
+                // zoomed OUT). Just leave zoom alone — user sets it
+                // manually and any antiban drift is their TRiBot
+                // setting to disable.
             } catch (Exception e) {
                 Log.error("Error checking camera angle: " + e.getMessage());
             }
