@@ -9572,17 +9572,26 @@ public class Corp implements TribotScript {
 			if (inputStripped.equals(hostStripped)) {
 				Log.info("Friend-house input already correct (\"" + existingInput
 						+ "\") — submitting");
-				// 1.9.51: per user — if the name is there, submit now,
-				// no hesitation. Use whichever submit path is available
-				// THIS instant: shortcut widget if visible, otherwise
-				// Enter. The outer retry handles the rare case both fail.
+				// 1.9.77: per user 'its not typing in the name' — when
+				// the shortcut isn't rendered, bare Keyboard.pressEnter()
+				// no-ops because canvas focus is lost. Instead RETYPE
+				// the name and then press Enter. typeString restores
+				// canvas focus by sending keypresses, after which Enter
+				// reliably submits even with the same "Timetoafk" already
+				// in the buffer (the chat input handles repeat input
+				// without doubling because the dialog submits on Enter,
+				// not on each keystroke).
 				Optional<Widget> shortcutByText = findFriendHouseShortcutByText(hostName);
 				if (shortcutByText.isPresent()) {
 					Log.info("Clicking 'Last name:' shortcut to submit");
 					shortcutByText.get().click();
 				} else {
-					Log.info("No shortcut widget — pressing Enter");
-					try { Keyboard.pressEnter(); } catch (Exception ignored) {}
+					Log.info("No shortcut widget — retyping name + Enter");
+					try {
+						Keyboard.typeString(hostName);
+						Waiting.waitNormal(150, 50);
+						Keyboard.pressEnter();
+					} catch (Exception ignored) {}
 				}
 				return Waiting.waitUntil(5000, () -> isInFriendHouse());
 			} else {
