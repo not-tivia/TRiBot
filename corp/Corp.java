@@ -1443,6 +1443,22 @@ public class Corp implements TribotScript {
                 } else {
                     Log.debug("Camera angle acceptable: " + currentAngle);
                 }
+
+                // 1.9.74: also enforce zoomed-out camera. User: 'every
+                // combat i have to manually zoom out more because our
+                // camera angle ends up too close.' TRiBot's mouse
+                // antiban or random scroll inputs can creep the zoom
+                // in over time. Force it back to a wide field of view
+                // periodically (same cadence as the angle check).
+                try {
+                    int currentZoom = Camera.getZoomPercent();
+                    final int TARGET_ZOOM_PERCENT = 25; // wide view; lower = more zoomed out
+                    if (currentZoom > TARGET_ZOOM_PERCENT + 15) {
+                        Log.info("Camera zoom too close: " + currentZoom
+                                + "% - resetting to " + TARGET_ZOOM_PERCENT + "%");
+                        Camera.setZoomPercent(TARGET_ZOOM_PERCENT);
+                    }
+                } catch (Throwable ignored) {}
             } catch (Exception e) {
                 Log.error("Error checking camera angle: " + e.getMessage());
             }
@@ -5099,22 +5115,37 @@ public class Corp implements TribotScript {
      * Cast the vengeance spell
      */
     private boolean castVengeance() {
+        // 1.9.74: try Magic.cast("Vengeance") FIRST — it's the SDK's
+        // dedicated spell-cast helper, much more reliable than hunting
+        // for widgets by name. User: 'veng isnt working still. How did
+        // our original version handle vengence?' Original was probably
+        // texture-ID based or used the SDK's Magic class. We'll use
+        // Magic.cast and fall back to the widget hunt if it fails.
+        long before = System.currentTimeMillis();
         try {
-            Log.info("Casting Vengeance using widget method...");
+            Log.info("Casting Vengeance via Magic.cast('Vengeance')");
+            boolean ok = Magic.cast("Vengeance");
+            if (ok) {
+                Log.info("Magic.cast returned true");
+                lastVengeanceCast = before;
+                hasUsedVengeanceThisTrip = true;
+                vengeanceQueued = false;
+                return true;
+            }
+            Log.info("Magic.cast returned false — falling back to widget click");
+        } catch (Throwable t) {
+            Log.warn("Magic.cast threw: " + t.getMessage() + " — falling back to widget click");
+        }
 
-            // Use the working widget-based method with index 142
+        try {
             castVengeanceWidget(142);
-
-            // Update tracking variables
-            lastVengeanceCast = System.currentTimeMillis();  // CHANGED: was lastVengeanceCastTime
+            lastVengeanceCast = before;
             hasUsedVengeanceThisTrip = true;
             vengeanceQueued = false;
-
-            Log.info("Vengeance cast successfully via widget method");
+            Log.info("Vengeance cast via widget fallback");
             return true;
-
         } catch (Exception e) {
-            Log.error("Vengeance casting failed: " + e.getMessage());
+            Log.error("Vengeance casting failed (both paths): " + e.getMessage());
             return false;
         }
     }
@@ -8223,17 +8254,21 @@ public class Corp implements TribotScript {
      * Normal eating - Sharks preferred, Karambwans as fallback
      */
     private boolean normalEat() {
-        // Priority 1: Try to eat shark
-        Optional<InventoryItem> sharkOpt = Query.inventory().nameEquals("Shark").findFirst();
-        if (sharkOpt.isPresent() && sharkOpt.get().click("Eat")) {
-            Log.info("Ate Shark (normal)");
+        // 1.9.74: karambwan FIRST for normal eats, shark fallback. User:
+        // 'we should also use karamwans as our main food and use sharks
+        // mostly for combo eating.' Keeps shark stock available for the
+        // emergencyComboEat path (shark + karambwan in same tick = 38 HP)
+        // which is what saves us in dark-core / panic situations.
+        Optional<InventoryItem> karambwanOpt = Query.inventory().nameEquals("Cooked karambwan").findFirst();
+        if (karambwanOpt.isPresent() && karambwanOpt.get().click("Eat")) {
+            Log.info("Ate Karambwan (normal)");
             return waitForHealthIncrease();
         }
 
-        // Priority 2: Fallback to karambwan if no sharks
-        Optional<InventoryItem> karambwanOpt = Query.inventory().nameEquals("Cooked karambwan").findFirst();
-        if (karambwanOpt.isPresent() && karambwanOpt.get().click("Eat")) {
-            Log.info("Ate Karambwan (fallback - no sharks)");
+        // Fallback to shark if no karambwans
+        Optional<InventoryItem> sharkOpt = Query.inventory().nameEquals("Shark").findFirst();
+        if (sharkOpt.isPresent() && sharkOpt.get().click("Eat")) {
+            Log.info("Ate Shark (fallback - no karambwans)");
             return waitForHealthIncrease();
         }
 
