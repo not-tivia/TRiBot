@@ -1298,6 +1298,9 @@ public class Corp implements TribotScript {
     private boolean wasInCombat = false;
     private long lastCombatTime = 0;
     private long darkCoreLastSeen = 0;
+    // 1.9.73: latched per core-engagement so we only attempt the
+    // auto-retaliate disable once. Reset when the core grace expires.
+    private boolean autoRetaliateDisabledForThisCore = false;
     private final WorldTile lastSafePosition = null;
     // Vengeance tracking
     private boolean hasUsedVengeanceThisTrip = false;
@@ -3332,13 +3335,26 @@ public class Corp implements TribotScript {
         // bot just stands there auto-attacking Corp while the core
         // lands. We turn it back on when the core is gone (after the
         // 3s grace timer below).
-        try {
-            if (Combat.isAutoRetaliateOn()) {
-                Log.info("Dark core present — disabling auto-retaliate so "
-                        + "the core click sticks");
-                Combat.setAutoRetaliate(false);
-            }
-        } catch (Exception ignored) {}
+        // 1.9.73: throttle the auto-retaliate disable. Pre-1.9.73 this
+        // fired every tick because Combat.setAutoRetaliate(false) may
+        // not actually persist on some clients — isAutoRetaliateOn()
+        // returned true again next tick. Spam-clicking the auto-retaliate
+        // button each tick fights the core attack click. Now: only
+        // attempt the disable once per core engagement, on the same
+        // tick we transition into the handler. User: 'core handling
+        // is a little better, although its still a little wonky between
+        // staying alive, disable auto retliate and trying to kill the
+        // core.'
+        if (!autoRetaliateDisabledForThisCore) {
+            try {
+                if (Combat.isAutoRetaliateOn()) {
+                    Log.info("Dark core present — disabling auto-retaliate "
+                            + "(one-shot for this core engagement)");
+                    Combat.setAutoRetaliate(false);
+                }
+                autoRetaliateDisabledForThisCore = true;
+            } catch (Exception ignored) {}
+        }
 
         // 1.9.58: only eat when HEALTH IS CRITICAL during core. Pre-1.9.58
         // we eat-combo'd at HP <= INTERNAL_EMERGENCY_HP (50) AND at HP <=
@@ -3393,6 +3409,8 @@ public class Corp implements TribotScript {
                     Combat.setAutoRetaliate(true);
                 }
             } catch (Exception ignored) {}
+            // 1.9.73: reset latch so the next core triggers a fresh disable.
+            autoRetaliateDisabledForThisCore = false;
             currentState = BotState.FIGHTING_CORP;
             return;
         }
