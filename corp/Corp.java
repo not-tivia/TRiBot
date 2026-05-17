@@ -8120,17 +8120,27 @@ public class Corp implements TribotScript {
 
         int currentHealth = MyPlayer.getCurrentHealth();
 
-        // 1.8.9: combo eat (Shark + Karambwan, 38 HP) whenever HP is below 50.
-        // Pre-1.8.9 the script only combo-ate at <= INTERNAL_EMERGENCY_HP (15),
-        // which let HP fall into "one Corp hit kills you" range before
-        // reacting. Above 50, normal single-eat is enough to keep pace.
+        // 1.9.72: ALSO skip the normal-eat threshold when restoration is
+        // pending. User: 'sometimes when we are in the spec dump phase
+        // it still eats at pretty high hp before teleporting out. like
+        // i can be 70 hp and then ill eat to 90 and then teele out.'
+        // 1.9.62 only skipped during the TELEPORTING_TO_HOUSE+ states;
+        // but there's a window in FIGHTING_CORP/USING_SPECIAL_ATTACK
+        // where the bot has decided to restore (shouldStartRestorationCycle
+        // = true) but hasn't transitioned yet. During that window
+        // handleHealthAndPrayer fires a normal eat that the pool would
+        // overwrite. Combo eat (HP <= 50 = panic) still runs because
+        // we might die before getting to the pool.
+        boolean restorationPending = false;
+        try { restorationPending = shouldStartRestorationCycle(); } catch (Exception ignored) {}
+
         if (currentHealth <= INTERNAL_COMBO_EAT_HP) {
             emergencyComboEat();
-        } else if (currentHealth <= eatHealthThreshold()) {
+        } else if (!restorationPending && currentHealth <= eatHealthThreshold()) {
             normalEat();
         }
 
-        if (Prayer.getPrayerPoints() <= INTERNAL_DRINK_PRAYER_THRESHOLD) {
+        if (!restorationPending && Prayer.getPrayerPoints() <= INTERNAL_DRINK_PRAYER_THRESHOLD) {
             drinkPrayerPotion();
         }
     }
