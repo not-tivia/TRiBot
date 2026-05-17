@@ -2419,10 +2419,7 @@ public class Corp implements TribotScript {
 
         // Step 4: Open bank
         if (!Bank.isOpen()) {
-            // 1.9.14: settle delay before clicking the bank chest. Just
-            // arrived at Ferox (via Ring of Dueling); the chest object
-            // may take a tick or two to fully load after the tele. A click
-            // before render finishes can hit empty ground (walk-here).
+            // 1.9.14: settle delay before clicking the bank chest.
             Waiting.waitNormal(700, 200);
             // Try to find and left-click bank chest specifically
             Optional<GameObject> bankChestOpt = Query.gameObjects()
@@ -2433,9 +2430,24 @@ public class Corp implements TribotScript {
                 GameObject bankChest = bankChestOpt.get();
                 Log.info("Left-clicking bank chest");
                 if (bankChest.interact("Use") || bankChest.interact("Bank")) {
-                    if (!Waiting.waitUntil(6000, () -> Bank.isOpen())) {
-                        Log.error("Failed to open bank via bank chest");
-                        return;
+                    // 1.9.85: longer wait (10s) + post-timeout grace check.
+                    // User: 'we are trying to open the bank even though we
+                    // already have the bank open.' Bank.isOpen() can lag
+                    // 1-3 seconds behind the actual open state on slow
+                    // ticks — pre-1.9.85's 6s timeout would expire, the
+                    // function would return, and the next iteration
+                    // click the chest AGAIN which CLOSES the now-open
+                    // bank (right-click style toggle). Now: 10s wait,
+                    // then one more poll after a 1s settle before
+                    // declaring failure.
+                    if (!Waiting.waitUntil(10000, () -> Bank.isOpen())) {
+                        Waiting.waitNormal(1000, 200);
+                        if (Bank.isOpen()) {
+                            Log.info("Bank opened (caught after 10s timeout window)");
+                        } else {
+                            Log.error("Failed to open bank via bank chest");
+                            return;
+                        }
                     }
                 }
             } else if (Bank.open()) {
