@@ -1531,7 +1531,7 @@ public class Corp implements TribotScript {
 	//         path uses LocalWalking which can't actually cross
 	//         through the passage; the bug was always the passage
 	//         click. Reverted that change.)
-	private static final String SCRIPT_VERSION = "1.9.99.233";
+	private static final String SCRIPT_VERSION = "1.9.99.234";
 	private static final String SETTINGS_PREFIX = "corp_";
 	private static final String DEFAULT_PROFILE = "default";
 	private CorpSettings settings = new CorpSettings();
@@ -9956,11 +9956,34 @@ public class Corp implements TribotScript {
 		// tick and re-evaluates next tick. User: "What if we are up against
 		// the wall ... we would still try to kill it ... which would cuz
 		// is to get stomped and die?"
+		// 1.9.99.234: re-fetch corpArea AND corePos at arrival time. The
+		// walk can take up to 1500ms; Corp drifts at ~1 tile/game-tick
+		// (~600ms) so the bestTile we picked at t=0 may be INSIDE Corp's
+		// hitbox by arrival OR the core may have moved out from under
+		// us. Pre-1.9.99.234 we checked against the STALE corpArea
+		// snapshot from function start, falsely concluded safety,
+		// returned true; caller fired the click; bot took a stomp on
+		// the first move from the now-unsafe tile. User log 03:49:32-35:
+		// "Dark core adjacent (dist=0.0) - attacking" → "EMERGENCY:
+		// Combo eating" → "Big hit detected: 37 damage" → "STOMP
+		// DEFENSE: stepping off".
 		WorldTile finalPos = MyPlayer.getTile();
-		if (finalPos == null || !isSafeMeleeTileOf(finalPos, corePos, corpArea)) {
-			Log.warn("walkToSafeCoreMeleeTile: didn't reach a safe melee tile (final="
-					+ finalPos + ", target=" + safeTile + ") — caller should skip "
-					+ "attack this tick");
+		Area freshCorpArea = corpArea;
+		WorldTile freshCorePos = corePos;
+		try {
+			Area a = corp.getArea();
+			if (a != null) freshCorpArea = a;
+			WorldTile cp = core.getTile();
+			if (cp != null) freshCorePos = cp;
+		} catch (Throwable ignored) {}
+		if (finalPos == null || !isSafeMeleeTileOf(finalPos, freshCorePos, freshCorpArea)) {
+			boolean corpDrifted = freshCorpArea != null && corpArea != null
+					&& freshCorpArea.getCenter() != null && corpArea.getCenter() != null
+					&& !freshCorpArea.getCenter().equals(corpArea.getCenter());
+			Log.warn("walkToSafeCoreMeleeTile: didn't reach a safe melee tile by arrival "
+					+ "(final=" + finalPos + ", target=" + safeTile
+					+ ", corpDrifted=" + corpDrifted
+					+ ") — caller should skip attack this tick");
 			return false;
 		}
 		return true;
