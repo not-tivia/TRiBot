@@ -1531,7 +1531,7 @@ public class Corp implements TribotScript {
 	//         path uses LocalWalking which can't actually cross
 	//         through the passage; the bug was always the passage
 	//         click. Reverted that change.)
-	private static final String SCRIPT_VERSION = "1.9.99.236";
+	private static final String SCRIPT_VERSION = "1.9.99.237";
 	private static final String SETTINGS_PREFIX = "corp_";
 	private static final String DEFAULT_PROFILE = "default";
 	private CorpSettings settings = new CorpSettings();
@@ -17254,7 +17254,12 @@ public class Corp implements TribotScript {
             g.setColor(new Color(0, 0, 0, 160));
             g.fillRect(x - 4, y - 14, boxW, boxH);
             g.setColor(Color.WHITE);
-            g.drawString("Corp script — state: " + paintState.state, x, y); y += rowH;
+            // 1.9.99.237: show bytecode version on overlay so user can
+            // verify which version is loaded at a glance — same purpose
+            // as the startup banner but persistent on screen. Catches
+            // the "stale-classloader" case where Stop→Start kept
+            // cached classes.
+            g.drawString("Corp v" + SCRIPT_VERSION + " — state: " + paintState.state, x, y); y += rowH;
             g.drawString("Spec weapon: " + paintState.weapon, x, y); y += rowH;
             g.drawString("Specs this kill: " + (paintState.specCounts.isEmpty() ? "-" : paintState.specCounts), x, y); y += rowH;
             // 1.9.99.197: team totals from coord aggregate. Verifies coord is
