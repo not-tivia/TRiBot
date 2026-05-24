@@ -7689,7 +7689,7 @@ public class Corp implements TribotScript {
                     && lineCrossesCorp(myPos, position, corpArea)) ? -2 : 0;
             // 1.9.99.225: deterministic-by-index quadrant pref (replaces
             // 1.9.99.185's hash-based approach). Pre-1.9.99.225 we mapped
-            // RSN.hashCode() to an angle. For "In_The_Way" vs "In_The_Gay"
+            // RSN.hashCode() to an angle. For "<bot-a>" vs "<bot-b>"
             // the hash delta was 16 * 31^2 = 15,376, mapping to ~84° angle
             // separation — enough in theory but in practice both bots
             // ended up ping-ponging between (2998,4387) [NE] and
@@ -15025,7 +15025,7 @@ public class Corp implements TribotScript {
 						// start with a timestamp like "[10:27]" and frequently
 						// include the host's RSN (drop announcements, public chat,
 						// trade msgs). User log showed
-						// "[10:27] TimeToAFK received a drop: 30 x Tuna potato..."
+						// "[10:27] <friend-host> received a drop: 30 x Tuna potato..."
 						// matching here and blocking the friend-house entry for
 						// three attempts until the script gave up. The input field
 						// itself only contains the typed name (no timestamp).
@@ -15125,7 +15125,7 @@ public class Corp implements TribotScript {
 				// no-ops because canvas focus is lost. Instead RETYPE
 				// the name and then press Enter. typeString restores
 				// canvas focus by sending keypresses, after which Enter
-				// reliably submits even with the same "Timetoafk" already
+				// reliably submits even with the same "<friend-host>" already
 				// in the buffer (the chat input handles repeat input
 				// without doubling because the dialog submits on Enter,
 				// not on each keystroke).
@@ -15156,7 +15156,7 @@ public class Corp implements TribotScript {
 
 		// 1.9.15 / 1.9.16: search root 162 (chatbox) for an INTERACTIVE
 		// widget whose text contains the host name. Pre-1.9.16 we just
-		// matched text containing "timetoafk" — but that also matches the
+		// matched text containing "<friend-host>" — but that also matches the
 		// static text-label widget which is NOT clickable. Clicking a
 		// non-interactive widget falls through to a "click ground" which
 		// makes the bot walk off into the distance. Now we require at
@@ -15658,9 +15658,8 @@ public class Corp implements TribotScript {
     /** All user-tweakable values. Defaults match the original hardcoded constants. */
     public static class CorpSettings {
         // POH / Team
-        public String friendName = "TimeToAFK";
-        public List<String> acceptableTeammates = new ArrayList<>(Arrays.asList(
-                "TimeToAFK", "RicoSuave32", "ahoyzfharem", "Nathan Lee", "In The Way"));
+        public String friendName = "";
+        public List<String> acceptableTeammates = new ArrayList<>();
         // 1.8.8: no longer the primary loop driver — it's now a safety upper
         // bound. The real termination is phase targets met OR Corp HP <
         // corpMinHpForSpec. Bumped 3 → 10 so it never triggers in practice;
@@ -18022,7 +18021,7 @@ public class Corp implements TribotScript {
      *  into phase N this kill, we never regress to a lower phase — even
      *  if the natural calculation says otherwise. This prevents weapon
      *  thrash from teammate-visibility flicker: realCount drops to 0 when
-     *  TimeToAFK walks behind a wall, multiplier goes 2x → 1x, phase1Specs
+     *  a real teammate walks behind a wall, multiplier goes 2x → 1x, phase1Specs
      *  agg drops back below target, "natural" phase regresses 2 → 1, bot
      *  re-equips Elder maul mid-Arclight-rotation. Reset in
      *  coordinatorOnKillEnded(). */

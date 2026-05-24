@@ -13,7 +13,7 @@ Inline `// 1.9.X:` comments throughout `Corp.java` provide per-change-site ratio
 - **Force-tile arrival verification (1.9.99.231)** — `walkToSafeCoreMeleeTile` now returns false if the bot didn't actually land on a safe melee tile (wall blocking path, core moved, etc.). Both core-attack callers honor the return value and skip the click instead of firing from the wrong tile. Trades a missed core hit for a guaranteed-no-stomp.
 
 ### Changed
-- **Quadrant preference seeding (1.9.99.225)** — replaced hash-based RSN-to-angle with deterministic-by-sorted-index. For 2 bots: index 0 → 0° (east), index 1 → 180° (west); zero chance of collision regardless of RSN spelling. Bumped quadrant weight 6 → 10 so the assigned side beats marginal separation differences on equivalent candidates. Fixes "In_The_Way" + "In_The_Gay" both north-favoring and ping-ponging between the same two corners.
+- **Quadrant preference seeding (1.9.99.225)** — replaced hash-based RSN-to-angle with deterministic-by-sorted-index. For 2 bots: index 0 → 0° (east), index 1 → 180° (west); zero chance of collision regardless of RSN spelling. Bumped quadrant weight 6 → 10 so the assigned side beats marginal separation differences on equivalent candidates. Fixes "<bot-a>" + "<bot-b>" both north-favoring and ping-ponging between the same two corners.
 
 ### Fixed
 - **Low-energy → infinite re-prep loop (1.9.99.224)** — `prepareSpecWeaponForCorp` gated the entire equip block on `Combat.getSpecialAttackPercent() >= getMinSpecEnergy()`. With energy = 10 and Arclight requiring 50, the gate was false → function returned with nothing equipped → state moved to `FIGHTING_CORP` → the 1.9.99.196 stuck-state recovery saw no weapon equipped → bounced back to `ENTERING_COMBAT` → ~10 iterations/sec forever. Now an `else if (isCorpAlive(corp))` branch equips the main weapon as the low-energy fallback.
@@ -54,7 +54,7 @@ Three behavior fixes:
 
 CRITICAL safety fix + walk-around-Corp fix.
 
-- **(a)** Hard gate against typing into public chat. Production log showed the bot typing "TimeToAFK" into PUBLIC CHAT after a state transition closed the friend-house dialog mid-sequence. Chatbox.isOpen() returns true for any chat window incl. public chat input, so the old gate didn't catch it. Now we require widget [162, 44] (the friend-house input field) BEFORE typing AND re-verify it BETWEEN typing and Enter. If either check fails, abort without typing.
+- **(a)** Hard gate against typing into public chat. Production log showed the bot typing "<friend-host>" into PUBLIC CHAT after a state transition closed the friend-house dialog mid-sequence. Chatbox.isOpen() returns true for any chat window incl. public chat input, so the old gate didn't catch it. Now we require widget [162, 44] (the friend-house input field) BEFORE typing AND re-verify it BETWEEN typing and Enter. If either check fails, abort without typing.
 - **(b)** Multi-step walk when straight line from player to chosen Corp position crosses Corp's hitbox. lineCrossesCorp samples points along the line; if any falls in corpArea, walk first to a waypoint on the player's side (5 tiles out from Corp center along the dominant approach axis), THEN to the target. Pre-1.9.21 RuneScape's A-star / L-shape pathing took the bot straight under Corp and we took stomp damage.
 
 ## [1.9.20] — 2026-05-16
@@ -94,7 +94,7 @@ Flow restructuring after the user pointed out several order-of-operations issues
 - **(a)** Ferox banking now uses GlobalWalking.walkToBank instead of LocalWalking-walking to a fixed tile. Ring-of-Dueling teleport lands the player outside the bank's render range, so LocalWalking can't path. The bot was stuck "looking for restoration pool" forever.
 - **(b)** Removed vengeance casting and spec prep from handleWaitingForTeam. Waiting for teammates in the lobby should be a true idle — no clicks, no casts. Veng gets healed off before we engage anyway, and lobby-prep was firing the failing Ice-Plateau-instead-of-Vengeance cast.
 - **(c)** Both moved into handleEnteringCombat which runs WHILE we walk into the boss room. Prayer + spec-button + veng all activate as instant clicks during the walk, so by the time we see Corp everything is queued.
-- **(d)** Friend-portal widget shortcut now searches root 162 by name instead of by hardcoded path [162, 39, 0] — same fragility we hit with the Vengeance widget at [218, 142]. Path-agnostic match should resolve "Last name: TimeToAFK" reliably.
+- **(d)** Friend-portal widget shortcut now searches root 162 by name instead of by hardcoded path [162, 39, 0] — same fragility we hit with the Vengeance widget at [218, 142]. Path-agnostic match should resolve "Last name: <friend-host>" reliably.
 
 ## [1.9.14] — 2026-05-16
 
@@ -125,7 +125,7 @@ Fix 1.9.11 compile error: Mouse.getPosition() and InventoryItem.getStackRectangl
 
 Two fixes after diagnosing the 1.9.10 typing bug:
 
-- **(a)** Friend-name typing dropped the first 4 characters. The chatbox dialog opens visually but the input field isn't always focused for keyboard input in the same tick. Production evidence: bot typed "TimeToAFK" but the remembered last-typed buffer was "ToAfK" (first 4 chars eaten by focus transition). Added a 400-700ms settle wait between dialog-open and typing.
+- **(a)** Friend-name typing dropped the first 4 characters. The chatbox dialog opens visually but the input field isn't always focused for keyboard input in the same tick. Production evidence: bot typed "<friend-host>" but the remembered last-typed buffer was "ToAfK" (first 4 chars eaten by focus transition). Added a 400-700ms settle wait between dialog-open and typing.
 - **(b)** Combo-eat picks the karambwan slot CLOSEST to the current mouse position. After the shark click the cursor sits on the shark slot; the nearest karambwan minimizes mouse-travel time so both eats land in the same game tick. Pre-1.9.11 took the first karambwan returned by Query.inventory which is typically the top-left slot — often far from the shark we just clicked.
 
 ## [1.9.10] — 2026-05-16
@@ -243,7 +243,7 @@ Two combat-loop bug fixes surfaced in production logs. - comboEatToFreeSlot / en
 
 ## [1.8.4] — 2026-05-15
 
-Friend-house dialog: corrected widget path for the "Last name: <rsn>" shortcut from [162, 38, 0] to [162, 39, 0]. Old path silently fell through to the typed-name path on every entry — slightly slower but worked. Now the one-click shortcut fires when we've visited the host before. Text comparison is now case-insensitive + color-tag-stripped so "TimeToAFK" matches the widget's "timetoafk" text. (Reference: typed-name input field is at [162, 44] — Keyboard.typeString routes to it via chat focus.)
+Friend-house dialog: corrected widget path for the "Last name: <rsn>" shortcut from [162, 38, 0] to [162, 39, 0]. Old path silently fell through to the typed-name path on every entry — slightly slower but worked. Now the one-click shortcut fires when we've visited the host before. Text comparison is now case-insensitive + color-tag-stripped so "<friend-host>" matches the widget's "<friend-host>" text. (Reference: typed-name input field is at [162, 44] — Keyboard.typeString routes to it via chat focus.)
 
 ## [1.8.3] — 2026-05-15
 
