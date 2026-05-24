@@ -1531,7 +1531,7 @@ public class Corp implements TribotScript {
 	//         path uses LocalWalking which can't actually cross
 	//         through the passage; the bug was always the passage
 	//         click. Reverted that change.)
-	private static final String SCRIPT_VERSION = "1.9.99.231";
+	private static final String SCRIPT_VERSION = "1.9.99.232";
 	private static final String SETTINGS_PREFIX = "corp_";
 	private static final String DEFAULT_PROFILE = "default";
 	private CorpSettings settings = new CorpSettings();
@@ -9663,13 +9663,42 @@ public class Corp implements TribotScript {
 				}
 				if (liveArea != null && myPos != null
 						&& lineCrossesCorp(myPos, bestPosition, liveArea)) {
-					Log.warn("Corp shifted — straight line to "
-							+ bestPosition + " crosses hitbox, "
-							+ "click-Attack instead");
-					if (attackCorpIfVisible(corp)) {
-						return Waiting.waitUntil(6000, () ->
-								isPlayerInCombat() || MyPlayer.isAnimating());
+					// 1.9.99.232: pre-1.9.99.232 the fallback here was
+					// attackCorpIfVisible — i.e. corp.interact("Attack")
+					// — which delegates to the GAME pathfinder. The game
+					// pathfinder doesn't know Corp's 5x5 hitbox is
+					// stomp-dangerous, so it happily routes the bot
+					// UNDER Corp to reach the nearest melee tile of
+					// whichever NPC was clicked. User log 03:26:41 →
+					// 03:26:45: "Corp shifted ... click-Attack instead"
+					// → bot ran across the entire hitbox → "Player on
+					// Corp's hitbox — emergency step away" (one stomp
+					// landed before stepOffCorp could fire).
+					// Now: try pickCornerWaypoint first with the LIVE
+					// corp position; if a safe corner exists, walk to
+					// it and let the next main-loop tick re-evaluate.
+					// If no safe corner, skip this tick entirely — the
+					// bot stays put for 1-2 ticks until Corp drifts to
+					// a better position. NEVER fall through to
+					// attackCorpIfVisible, which is the stomp path.
+					WorldTile center = liveArea.getCenter();
+					WorldTile corner = (center != null)
+							? pickCornerWaypoint(myPos, bestPosition, center, liveArea)
+							: null;
+					if (corner != null) {
+						Log.warn("Corp shifted — straight line to "
+								+ bestPosition + " crosses hitbox, "
+								+ "re-routing via corner " + corner);
+						LocalWalking.walkTo(corner);
+						Waiting.waitUntil(1500, () -> {
+							WorldTile c = MyPlayer.getTile();
+							return c != null && c.distanceTo(corner) <= 1;
+						});
+						return true;
 					}
+					Log.warn("Corp shifted — straight line to " + bestPosition
+							+ " crosses hitbox AND no safe corner — skipping "
+							+ "walk this tick (will re-evaluate next tick)");
 					return false;
 				}
 			}
