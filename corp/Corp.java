@@ -1531,7 +1531,7 @@ public class Corp implements TribotScript {
 	//         path uses LocalWalking which can't actually cross
 	//         through the passage; the bug was always the passage
 	//         click. Reverted that change.)
-	private static final String SCRIPT_VERSION = "1.9.99.235";
+	private static final String SCRIPT_VERSION = "1.9.99.236";
 	private static final String SETTINGS_PREFIX = "corp_";
 	private static final String DEFAULT_PROFILE = "default";
 	private CorpSettings settings = new CorpSettings();
@@ -9955,8 +9955,55 @@ public class Corp implements TribotScript {
 		Log.info("walkToSafeCoreMeleeTile: forcing attack tile " + bestTile
 				+ " (was at " + myPos + ", core at " + corePos
 				+ ", avoids BFS picking under-Corp tile)");
-		if (!LocalWalking.walkTo(bestTile)) return false;
+		// 1.9.99.236: dual-method walk fallback. LocalWalking.walkTo
+		// silently fails (returns true, bot doesn't actually move) when
+		// the dark core is stacked on the player's tile — the local
+		// pathfinder seems to choke on the 1-tile-step-with-NPC-stacked
+		// scenario. User log 04:28:51 onward: bot at (2985,4384), core
+		// at (2985,4384), target (2986,4384), walks repeatedly never
+		// move. After 1500ms wait, arrival check fails, function
+		// returns false, caller skips click, infinite loop, bot eats
+		// continuously. Fix: try LocalWalking first; if bot hasn't
+		// moved within 400ms, fall through to on-screen tile.click
+		// ("Walk here") which uses a different mouse-click path and
+		// works reliably for adjacent tiles. Stolen from stepOffCorp
+		// which has the same fallback chain.
 		final WorldTile safeTile = bestTile;
+		final WorldTile preWalkPos = myPos;
+		boolean walkInitiated = false;
+		try {
+			walkInitiated = LocalWalking.walkTo(bestTile);
+		} catch (Throwable ignored) {}
+		if (walkInitiated) {
+			// Did LocalWalking actually move the bot?
+			Waiting.waitUntil(400, () -> {
+				WorldTile c = MyPlayer.getTile();
+				return c != null && !c.equals(preWalkPos);
+			});
+			WorldTile midCheck = MyPlayer.getTile();
+			if (midCheck != null && midCheck.equals(preWalkPos)) {
+				// LocalWalking silently failed. Try on-screen click.
+				try {
+					if (bestTile.isVisible() && bestTile.click("Walk here")) {
+						Log.warn("walkToSafeCoreMeleeTile: LocalWalking didn't move "
+								+ "the bot within 400ms — fell through to on-screen "
+								+ "Walk-here click on " + bestTile);
+					}
+				} catch (Throwable ignored) {}
+			}
+		} else {
+			// LocalWalking refused to issue. Try on-screen click directly.
+			try {
+				if (bestTile.isVisible() && bestTile.click("Walk here")) {
+					Log.warn("walkToSafeCoreMeleeTile: LocalWalking refused — "
+							+ "using on-screen Walk-here click on " + bestTile);
+				} else {
+					return false;
+				}
+			} catch (Throwable ignored) {
+				return false;
+			}
+		}
 		final int hpStart = MyPlayer.getCurrentHealth();
 		Waiting.waitUntil(1500, () -> {
 			WorldTile cur = MyPlayer.getTile();
