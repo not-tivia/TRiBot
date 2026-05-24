@@ -1531,7 +1531,7 @@ public class Corp implements TribotScript {
 	//         path uses LocalWalking which can't actually cross
 	//         through the passage; the bug was always the passage
 	//         click. Reverted that change.)
-	private static final String SCRIPT_VERSION = "1.9.99.232";
+	private static final String SCRIPT_VERSION = "1.9.99.233";
 	private static final String SETTINGS_PREFIX = "corp_";
 	private static final String DEFAULT_PROFILE = "default";
 	private CorpSettings settings = new CorpSettings();
@@ -9502,12 +9502,17 @@ public class Corp implements TribotScript {
 						return !lineCrossesCorp(cur, claimed, corpAreaClaim);
 					});
 				} else {
-					Log.info("Claimed tile requires crossing Corp, no safe "
-							+ "corner — corp.interact('Attack')");
-					if (attackCorpIfVisible(corp)) {
-						return Waiting.waitUntil(6000, () ->
-								isPlayerInCombat() || MyPlayer.isAnimating());
-					}
+					// 1.9.99.233: don't fall to attackCorpIfVisible — its
+					// game pathfinder routes through Corp's hitbox and
+					// the bot ends up visually on the (cx±1, cy±1)
+					// inner-corner tiles while walking through. Skip
+					// this tick; next iteration re-evaluates with fresh
+					// Corp position. User: "bot will somehow end up
+					// inside the corps corner tiles ... happens
+					// constantly".
+					Log.warn("Claimed tile " + claimed + " requires crossing Corp "
+							+ "AND no safe corner — skipping engage this tick");
+					return false;
 				}
 			}
 			if (LocalWalking.walkTo(claimed)) {
@@ -9633,12 +9638,11 @@ public class Corp implements TribotScript {
 						return !lineCrossesCorp(cur, bestPosition, corpArea);
 					});
 				} else {
-					Log.warn("No safe corner waypoint found — falling back "
-							+ "to click-Attack on Corp (game pathfinder)");
-					if (attackCorpIfVisible(corp)) {
-						return Waiting.waitUntil(6000, () ->
-								isPlayerInCombat() || MyPlayer.isAnimating());
-					}
+					// 1.9.99.233: same fix as the claimed-tile path above.
+					// Game pathfinder routes through Corp; skip this
+					// tick instead of stomp-walking.
+					Log.warn("No safe corner waypoint found — skipping walk "
+							+ "this tick (will re-evaluate next tick)");
 					return false;
 				}
 			}
@@ -9653,12 +9657,13 @@ public class Corp implements TribotScript {
 			if (corpLive.isPresent()) {
 				Area liveArea = corpLive.get().getArea();
 				if (liveArea != null && liveArea.contains(bestPosition)) {
+					// 1.9.99.233: same fix as the "no safe corner" paths.
+					// Corp landed on our target. Game pathfinder would
+					// route the bot under Corp to "reach" the target.
+					// Skip this tick — next iteration picks a fresh
+					// target tile not under Corp.
 					Log.warn("Corp moved INTO target tile " + bestPosition
-							+ " — aborting walk, click-Attack instead");
-					if (attackCorpIfVisible(corp)) {
-						return Waiting.waitUntil(6000, () ->
-								isPlayerInCombat() || MyPlayer.isAnimating());
-					}
+							+ " — skipping walk this tick (will re-pick next tick)");
 					return false;
 				}
 				if (liveArea != null && myPos != null
