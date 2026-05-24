@@ -1531,7 +1531,7 @@ public class Corp implements TribotScript {
 	//         path uses LocalWalking which can't actually cross
 	//         through the passage; the bug was always the passage
 	//         click. Reverted that change.)
-	private static final String SCRIPT_VERSION = "1.9.99.238";
+	private static final String SCRIPT_VERSION = "1.9.99.239";
 	private static final String SETTINGS_PREFIX = "corp_";
 	private static final String DEFAULT_PROFILE = "default";
 	private CorpSettings settings = new CorpSettings();
@@ -9983,12 +9983,32 @@ public class Corp implements TribotScript {
 		try {
 			walkInitiated = LocalWalking.walkTo(bestTile);
 		} catch (Throwable ignored) {}
+		// 1.9.99.239 (H1): track HP across the entire walk window —
+		// captured BEFORE the 400ms verification wait (was previously
+		// captured AFTER → 400ms was unguarded). Used by both waits to
+		// detect bails.
+		final int hpStart = MyPlayer.getCurrentHealth();
+		final boolean[] hpBailed = { false };
 		if (walkInitiated) {
-			// Did LocalWalking actually move the bot?
+			// Did LocalWalking actually move the bot? 1.9.99.239 (H1):
+			// add HP guard — bot may be taking stomps during this window
+			// (started in Corp's hitbox or stacked-with-core), and the
+			// 400ms blocks the main loop's emergency-eat / panic-tele.
 			Waiting.waitUntil(400, () -> {
+				int curHp = MyPlayer.getCurrentHealth();
+				if (curHp > 0 && (curHp <= INTERNAL_PANIC_TELE_HP || curHp <= hpStart - 15)) {
+					hpBailed[0] = true;
+					return true;
+				}
 				WorldTile c = MyPlayer.getTile();
 				return c != null && !c.equals(preWalkPos);
 			});
+			if (hpBailed[0]) {
+				Log.warn("walkToSafeCoreMeleeTile: HP dropped during 400ms walk-init "
+						+ "wait (start=" + hpStart + ", now=" + MyPlayer.getCurrentHealth()
+						+ ") — bailing");
+				return false;
+			}
 			WorldTile midCheck = MyPlayer.getTile();
 			if (midCheck != null && midCheck.equals(preWalkPos)) {
 				// LocalWalking silently failed. Try on-screen click.
@@ -10013,18 +10033,23 @@ public class Corp implements TribotScript {
 				return false;
 			}
 		}
-		final int hpStart = MyPlayer.getCurrentHealth();
 		Waiting.waitUntil(1500, () -> {
 			WorldTile cur = MyPlayer.getTile();
 			if (cur == null) return false;
 			int curHp = MyPlayer.getCurrentHealth();
 			if (curHp > 0 && (curHp <= INTERNAL_PANIC_TELE_HP || curHp <= hpStart - 15)) {
+				hpBailed[0] = true;
 				Log.warn("walkToSafeCoreMeleeTile: HP " + hpStart + " -> " + curHp
 						+ " — bailing to main loop");
 				return true;
 			}
 			return cur.distanceTo(safeTile) <= 0.5;
 		});
+		// 1.9.99.239 (C2): if we exited the wait via HP-bail (not arrival),
+		// ALWAYS return false regardless of whether we happened to land on
+		// the safe tile. Caller must skip the click so the main loop's
+		// emergency-eat / panic-tele branch can run this tick.
+		if (hpBailed[0]) return false;
 		// 1.9.99.231: VERIFY we actually arrived on a safe melee tile before
 		// returning true. Pre-1.9.99.231 the function returned true
 		// unconditionally — if walkTo couldn't complete (wall blocked path,
@@ -10049,19 +10074,31 @@ public class Corp implements TribotScript {
 		WorldTile finalPos = MyPlayer.getTile();
 		Area freshCorpArea = corpArea;
 		WorldTile freshCorePos = corePos;
+		boolean freshFetchOk = false;
 		try {
 			Area a = corp.getArea();
 			if (a != null) freshCorpArea = a;
 			WorldTile cp = core.getTile();
 			if (cp != null) freshCorePos = cp;
+			freshFetchOk = (a != null && cp != null);
 		} catch (Throwable ignored) {}
 		if (finalPos == null || !isSafeMeleeTileOf(finalPos, freshCorePos, freshCorpArea)) {
-			boolean corpDrifted = freshCorpArea != null && corpArea != null
-					&& freshCorpArea.getCenter() != null && corpArea.getCenter() != null
-					&& !freshCorpArea.getCenter().equals(corpArea.getCenter());
+			// 1.9.99.239 (M2): only claim corpDrifted=true/false when the
+			// fresh fetch actually succeeded. Pre-fix the false branch
+			// could trigger when the fetch threw, falsely reporting
+			// "corpDrifted=false" while we had no idea.
+			String driftFlag;
+			if (!freshFetchOk) {
+				driftFlag = "unknown";
+			} else if (freshCorpArea.getCenter() != null && corpArea.getCenter() != null
+					&& !freshCorpArea.getCenter().equals(corpArea.getCenter())) {
+				driftFlag = "true";
+			} else {
+				driftFlag = "false";
+			}
 			Log.warn("walkToSafeCoreMeleeTile: didn't reach a safe melee tile by arrival "
 					+ "(final=" + finalPos + ", target=" + safeTile
-					+ ", corpDrifted=" + corpDrifted
+					+ ", corpDrifted=" + driftFlag
 					+ ") — caller should skip attack this tick");
 			return false;
 		}
@@ -10103,6 +10140,20 @@ public class Corp implements TribotScript {
 		if (center == null) return false;
 		WorldTile corner = pickCornerWaypoint(myPos, target, center, corpArea);
 		if (corner == null) return false;
+		// 1.9.99.239 (H4): re-fetch Corp's area RIGHT before issuing the
+		// walk. Corp drifts ~1 tile/game-tick (~600ms); pickCornerWaypoint
+		// used the snapshot from function entry. If Corp shifted into the
+		// picked corner during the microseconds between pick and walk,
+		// LocalWalking.walkTo(corner) would walk the bot directly into the
+		// drifted hitbox. Abort if so — caller will retry next tick.
+		try {
+			Area liveArea = corp.getArea();
+			if (liveArea != null && liveArea.contains(corner)) {
+				Log.warn("preWalkAroundCorp: corner " + corner + " is now inside Corp's "
+						+ "drifted hitbox — skipping L-shape walk this tick");
+				return false;
+			}
+		} catch (Throwable ignored) {}
 		Log.info("preWalkAroundCorp: straight line to " + target
 				+ " crosses Corp — L-shape via corner " + corner);
 		if (!LocalWalking.walkTo(corner)) return false;
@@ -17130,6 +17181,14 @@ public class Corp implements TribotScript {
         minCorpHpPercentThisKill = 1.0;
         maxCorpHpPercentThisKill = 0.0;
         corpSeenAtZeroHp = false;
+        // 1.9.99.239 (H2): pre-activate roll flags. Without this, a bot
+        // that drifts-catches-up while banking (no POH cycle in between
+        // to clear them via restorationFinished) inherits "pre-activate
+        // already rolled" from the missed kill — next engagement skips
+        // its own pre-activate dice. Also autoRetaliateDisabledForThisCore
+        // for symmetry with the abort path.
+        resetSpecPreActivationRolls();
+        autoRetaliateDisabledForThisCore = false;
     }
 
     /** 1.9.99.238: catch up if a teammate finished a kill while we were
@@ -17149,6 +17208,10 @@ public class Corp implements TribotScript {
      *  Called from the main loop right after coordinatorPublish, so
      *  drift is detected within one tick of returning to boss-room area. */
     private void catchUpCoordKillDrift() {
+        // 1.9.99.239 (L1): early-return when coordinator is fully disabled
+        // — coordinatorTeamKillId returns -1 then but avoid the file/port
+        // read each tick on solo runs.
+        if (!settings.coordinatorEnabled && !settings.useCoordinatorPort) return;
         long teamKillId = coordinatorTeamKillId();
         if (teamKillId <= localKillId) return;
         long drift = teamKillId - localKillId;
@@ -17159,7 +17222,21 @@ public class Corp implements TribotScript {
                 + "on stale min-HP from the kill we missed");
         localKillId = teamKillId;
         killCount += drift; // overlay counter — credit the missed kills
+        // 1.9.99.239 (C1): drop any in-flight spec attempts BEFORE the
+        // reset. Pre-1.9.99.239 a pending BGS/Arclight/DWH attempt from
+        // the now-finished kill would confirm later (via hitsplat or XP)
+        // and call recordSpecUsed → wrote into the fresh snapshot at the
+        // NEW killId. The spec got attributed to a kill the bot hadn't
+        // actually started, inflating team Phase-3 totals and causing
+        // the team to skip Phase 3 prematurely on every POH-drift cycle.
+        pendingHits.clear();
         resetPerKillStateForNewKill();
+        // 1.9.99.239 (H3): force-publish immediately so other bots see
+        // the cleared claimedCorpOffset within this tick. Without this,
+        // other bots' encroachment-relocate runs in the same window see
+        // no claim for ~1 tick and may converge on a tile this bot is
+        // about to re-claim.
+        coordinatorPublishNow();
     }
 
     // 1.9.90: clear per-kill latches when a kill aborts (death/escape) without going
