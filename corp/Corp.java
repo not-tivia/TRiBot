@@ -1531,7 +1531,7 @@ public class Corp implements TribotScript {
 	//         path uses LocalWalking which can't actually cross
 	//         through the passage; the bug was always the passage
 	//         click. Reverted that change.)
-	private static final String SCRIPT_VERSION = "1.9.99.237";
+	private static final String SCRIPT_VERSION = "1.9.99.238";
 	private static final String SETTINGS_PREFIX = "corp_";
 	private static final String DEFAULT_PROFILE = "default";
 	private CorpSettings settings = new CorpSettings();
@@ -3073,6 +3073,15 @@ public class Corp implements TribotScript {
 
                 // Publish our state to the team coordinator (if enabled).
                 coordinatorPublish();
+
+                // 1.9.99.238: detect kill drift each tick — if a teammate
+                // killed Corp while we were away, bump localKillId and
+                // reset per-kill state BEFORE any FIGHTING_CORP /
+                // isInKillPhase logic runs. Otherwise the stale
+                // minCorpHpPercentThisKill latch from the kill we missed
+                // makes the bot think respawned full-HP Corp is in kill
+                // phase, forcing Fang swap.
+                catchUpCoordKillDrift();
 
                 // ANTI-STOMP: highest-priority safety check. If we're standing under
                 // Corp (its 5x5 hitbox), step off NOW before doing anything else.
@@ -17079,6 +17088,15 @@ public class Corp implements TribotScript {
     private void coordinatorOnKillEnded() {
         localKillId++;
         killCount++; // overlay counter
+        resetPerKillStateForNewKill();
+    }
+
+    /** 1.9.99.238: extracted state-reset logic so both coordinatorOnKillEnded
+     *  AND catchUpCoordKillDrift can call it. Pre-1.9.99.238 the reset was
+     *  inlined ONLY in coordinatorOnKillEnded, so a bot that missed a kill
+     *  (POH/banking when Corp died) never ran the reset — stale per-kill
+     *  ratchets bled into the next kill on respawned Corp. */
+    private void resetPerKillStateForNewKill() {
         // 1.9.99.211: clear() instead of new — heartbeat thread may hold a
         // reference to specsThisKill via in-flight publish; replacing the
         // reference creates a window where heartbeat serializes the OLD map
@@ -17099,6 +17117,49 @@ public class Corp implements TribotScript {
         lastCorpHealthBarVisible = false;
         lastCorpInteracting = false; // 1.9.99.108
         coreEngagementCommitted = false; // 1.9.99.204
+        // 1.9.99.238: include HP ratchets. Pre-1.9.99.238 these only reset
+        // in resetPerKillStateAfterAbort (death/escape path), NOT here in
+        // the normal kill-end path. Even normal kills had a tiny bleed
+        // (next-kill's first isInKillPhase tick used the prior kill's
+        // min-HP latch until a fresh low-HP reading came in). For the
+        // missed-kill path (catchUpCoordKillDrift), this is critical —
+        // the away bot never sees Corp at low HP for the missed kill, so
+        // without this reset the latch from the PRE-POH kill stays
+        // armed indefinitely and isInKillPhase returns true on
+        // respawned-full-HP Corp.
+        minCorpHpPercentThisKill = 1.0;
+        maxCorpHpPercentThisKill = 0.0;
+        corpSeenAtZeroHp = false;
+    }
+
+    /** 1.9.99.238: catch up if a teammate finished a kill while we were
+     *  away (POH/banking/teleport). Without this, an away bot's stale
+     *  per-kill state (minCorpHpPercentThisKill ratchet,
+     *  lastObservedCorpHpPercent, etc.) bleeds into the NEW kill on
+     *  respawned Corp — isInKillPhase() returns true on a fresh-spawn
+     *  full-HP Corp via the stale low-water latch, bot queues Fang swap
+     *  and "forces the kill" with Fang instead of doing P1/P2/P3 specs.
+     *  Pre-1.9.99.238 the COORDINATOR-CONFIRM block (line 5443) only
+     *  fired inside the "Corp NPC missing" check — Corp had already
+     *  respawned by the time the away bot returned, so the check was
+     *  dead. User: "if the corp dies and 1 of the accounts is missing
+     *  when corp dies; the other accounts dont communicate that to the
+     *  other bots. so when it comes back it'll try to force the kill
+     *  with its fang because it never witnessed it dying."
+     *  Called from the main loop right after coordinatorPublish, so
+     *  drift is detected within one tick of returning to boss-room area. */
+    private void catchUpCoordKillDrift() {
+        long teamKillId = coordinatorTeamKillId();
+        if (teamKillId <= localKillId) return;
+        long drift = teamKillId - localKillId;
+        Log.warn("DRIFT-CATCHUP: localKillId " + localKillId
+                + " → " + teamKillId + " (teammate(s) finished " + drift
+                + " kill" + (drift == 1 ? "" : "s") + " while we were away) — "
+                + "resetting per-kill state so isInKillPhase doesn't latch "
+                + "on stale min-HP from the kill we missed");
+        localKillId = teamKillId;
+        killCount += drift; // overlay counter — credit the missed kills
+        resetPerKillStateForNewKill();
     }
 
     // 1.9.90: clear per-kill latches when a kill aborts (death/escape) without going
