@@ -1531,7 +1531,7 @@ public class Corp implements TribotScript {
 	//         path uses LocalWalking which can't actually cross
 	//         through the passage; the bug was always the passage
 	//         click. Reverted that change.)
-	private static final String SCRIPT_VERSION = "1.9.99.234";
+	private static final String SCRIPT_VERSION = "1.9.99.235";
 	private static final String SETTINGS_PREFIX = "corp_";
 	private static final String DEFAULT_PROFILE = "default";
 	private CorpSettings settings = new CorpSettings();
@@ -9864,6 +9864,29 @@ public class Corp implements TribotScript {
 			myPos = MyPlayer.getTile();
 		} catch (Throwable t) { return false; }
 		if (corePos == null || corpArea == null || myPos == null) return false;
+
+		// 1.9.99.235: if the bot is currently INSIDE Corp's hitbox (e.g.
+		// got stomped onto an under-Corp tile, or core landed on bot's
+		// under-Corp tile), do NOT try to walk to a melee tile of the
+		// core — LocalWalking.walkTo from an under-Corp source tile
+		// often silently fails (the local pathfinder can reject the
+		// source as blocked), and the function busy-loops returning
+		// false every tick while the bot eats continuous stomps and
+		// burns through all food. Instead: forcibly step off Corp via
+		// the dedicated stepOffCorp helper (which uses different
+		// movement primitives that DO work from under-Corp tiles),
+		// then return false so the caller skips the click this tick.
+		// Next handleDarkCore tick fires with bot OUTSIDE Corp and the
+		// normal logic resumes. User log 04:07:31 -> 04:08:18+: bot
+		// stuck inside Corp for ~50 seconds eating non-stop while
+		// walkToSafeCoreMeleeTile spammed "didn't reach a safe melee
+		// tile by arrival" forever.
+		if (corpArea.contains(myPos)) {
+			Log.warn("walkToSafeCoreMeleeTile: bot is INSIDE Corp's hitbox at "
+					+ myPos + " — stepping off first (skipping core attack this tick)");
+			stepOffCorp(corp);
+			return false;
+		}
 		int cx = corePos.getX(), cy = corePos.getY(), cz = corePos.getPlane();
 		WorldTile[] meleeTiles = new WorldTile[] {
 				new WorldTile(cx - 1, cy, cz), // W
