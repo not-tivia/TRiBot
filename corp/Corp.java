@@ -9,6 +9,7 @@ import org.tribot.script.sdk.script.TribotScript;
 import org.tribot.script.sdk.walking.LocalWalking;
 import org.tribot.script.sdk.util.ScriptSettings;
 import org.tribot.script.sdk.util.TribotRandom;
+import org.tribot.script.sdk.antiban.PlayerPreferences;
 
 import javax.swing.*;
 import java.awt.BorderLayout;
@@ -1531,7 +1532,7 @@ public class Corp implements TribotScript {
 	//         path uses LocalWalking which can't actually cross
 	//         through the passage; the bug was always the passage
 	//         click. Reverted that change.)
-	private static final String SCRIPT_VERSION = "1.9.99.239";
+	private static final String SCRIPT_VERSION = "1.9.99.240";
 	private static final String SETTINGS_PREFIX = "corp_";
 	private static final String DEFAULT_PROFILE = "default";
 	private CorpSettings settings = new CorpSettings();
@@ -1994,23 +1995,52 @@ public class Corp implements TribotScript {
     private enum WeaponSwapLocation { LOBBY, BOSS_ROOM }
 
     /** 1.9.99.106: roll the per-trip timing plans. Called once per trip
-     *  alongside the spec-stage rolls. */
+     *  alongside the spec-stage rolls.
+     *  1.9.99.240: bias the rolls per-RSN via PlayerPreferences. Each
+     *  bot has a stable "favorite" combat-pot location (60% of trips
+     *  use it, 40% split between the other two) and a stable lobby-
+     *  vs-boss-room weapon-swap probability ∈ [0.50, 0.95]. So one
+     *  bot reliably prefers HOUSE_POST_POOL drinks + swap-in-lobby,
+     *  another prefers BOSS_ROOM_WALK drinks + swap-in-boss-room. */
     private void rollTripTimingPlans() {
-        // Combat pot: even 3-way split across house/lobby/boss-room.
         if (!combatPotPlanRolled) {
             combatPotPlanRolled = true;
-            int r = preActivateRng.nextInt(3);
-            combatPotPlanThisTrip = CombatPotLocation.values()[r];
-            Log.info("Trip plan: combat pot drink at " + combatPotPlanThisTrip);
+            // Pick this bot's favorite location (stable per RSN).
+            int favIdx = PlayerPreferences.preference(
+                    "combatPotFavoriteIdx",
+                    g -> g.uniform(0, CombatPotLocation.values().length - 1));
+            CombatPotLocation favorite = CombatPotLocation.values()[favIdx];
+            // Other two locations, ordered (stable per RSN via shuffle seed).
+            java.util.List<CombatPotLocation> others = new java.util.ArrayList<>();
+            for (CombatPotLocation loc : CombatPotLocation.values()) {
+                if (loc != favorite) others.add(loc);
+            }
+            // Stable order: alphabetical so it's deterministic per
+            // (favorite, others-set), no extra preference key needed.
+            others.sort(java.util.Comparator.comparing(Enum::name));
+            double r = preActivateRng.nextDouble();
+            if (r < 0.60) {
+                combatPotPlanThisTrip = favorite;
+            } else if (r < 0.80) {
+                combatPotPlanThisTrip = others.get(0);
+            } else {
+                combatPotPlanThisTrip = others.get(1);
+            }
+            Log.info("Trip plan: combat pot drink at " + combatPotPlanThisTrip
+                    + " (favorite=" + favorite + ")");
         }
-        // Weapon swap: 70% lobby (saves 0.6s of boss-room delay), 30% boss room.
         if (!weaponSwapPlanRolled) {
             weaponSwapPlanRolled = true;
-            int r = preActivateRng.nextInt(10);
-            weaponSwapPlanThisTrip = (r < 7)
+            // Per-bot lobby-swap chance ∈ [0.50, 0.95]. Some bots lean
+            // strongly toward lobby, others split closer to 50/50.
+            double lobbyChance = PlayerPreferences.preference(
+                    "weaponSwapLobbyChance",
+                    g -> g.uniform(0.50, 0.95));
+            weaponSwapPlanThisTrip = preActivateRng.nextDouble() < lobbyChance
                     ? WeaponSwapLocation.LOBBY
                     : WeaponSwapLocation.BOSS_ROOM;
-            Log.info("Trip plan: spec weapon swap at " + weaponSwapPlanThisTrip);
+            Log.info("Trip plan: spec weapon swap at " + weaponSwapPlanThisTrip
+                    + String.format(" (lobbyChance=%.0f%%)", lobbyChance * 100.0));
         }
     }
 
@@ -12141,6 +12171,17 @@ public class Corp implements TribotScript {
         // target amount, even if the deposit step had left full counts
         // in the inventory — causing a "cannot fit" failure when the
         // inventory was already topped up.
+        // 1.9.99.240: per-bot stable target offsets via PlayerPreferences.
+        // Each bot reliably carries slightly different food counts so
+        // visual inventory differs across the team. Range: -1..+2 for
+        // sharks, -1..+1 for karambwans. Floor at 1.
+        int sharkOffset = PlayerPreferences.preference(
+                "sharkTargetOffset", g -> g.uniform(-1, 2));
+        int karamOffset = PlayerPreferences.preference(
+                "karamTargetOffset", g -> g.uniform(-1, 1));
+        int wantSharks = Math.max(1, settings.targetSharks + sharkOffset);
+        int wantKarams = Math.max(1, settings.targetKarambwans + karamOffset);
+
         List<String> foodTasks = new ArrayList<>(Arrays.asList("karambwans", "sharks"));
         Collections.shuffle(foodTasks);
 
@@ -12148,21 +12189,35 @@ public class Corp implements TribotScript {
         for (String foodType : foodTasks) {
             if (foodType.equals("karambwans")) {
                 int have = Inventory.getCount("Cooked karambwan");
-                int want = settings.targetKarambwans;
-                if (have >= want) {
-                    Log.info("Skip karambwans withdraw — already have " + have + "/" + want);
+                if (have >= wantKarams) {
+                    Log.info("Skip karambwans withdraw — already have " + have + "/" + wantKarams);
                     continue;
                 }
-                int amount = firstFood ? Math.max(1, want - have) : 0;
+                // 1.9.99.240: inventory-full guard. If we have at least one
+                // karambwan and the inventory is full, skip the top-up
+                // instead of failing the bank trip with "cannot fit". User
+                // bug: "we try to withdraw food if our inventory is full
+                // sometimes". Returning false here would abort the whole
+                // bank step; a partial food load is fine for one trip.
+                if (have > 0 && Inventory.isFull()) {
+                    Log.warn("Inventory full — skipping karambwans top-up "
+                            + "(have " + have + "/" + wantKarams + ")");
+                    continue;
+                }
+                int amount = firstFood ? Math.max(1, wantKarams - have) : 0;
                 if (!withdrawKarambwans(amount)) return false;
             } else {
                 int have = Inventory.getCount("Shark");
-                int want = settings.targetSharks;
-                if (have >= want) {
-                    Log.info("Skip sharks withdraw — already have " + have + "/" + want);
+                if (have >= wantSharks) {
+                    Log.info("Skip sharks withdraw — already have " + have + "/" + wantSharks);
                     continue;
                 }
-                int amount = firstFood ? Math.max(1, want - have) : 0;
+                if (have > 0 && Inventory.isFull()) {
+                    Log.warn("Inventory full — skipping sharks top-up "
+                            + "(have " + have + "/" + wantSharks + ")");
+                    continue;
+                }
+                int amount = firstFood ? Math.max(1, wantSharks - have) : 0;
                 if (!withdrawSharks(amount)) return false;
             }
             firstFood = false;
