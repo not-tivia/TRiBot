@@ -19,6 +19,7 @@ import java.awt.Font;
 import java.awt.FlowLayout;
 import java.awt.Frame;
 import java.awt.Graphics2D;
+import java.awt.GridBagLayout;
 import java.awt.GridLayout;
 import java.net.InetSocketAddress;
 import java.net.Socket;
@@ -51,7 +52,7 @@ public class Corp implements TribotScript {
 	// adjacent to the affected code. This header used to inline ~1500
 	// lines of changelog (versions 1.9.90 — 1.9.99.85) but that bloated
 	// every script-token context; extracted in 1.9.99.241.
-	private static final String SCRIPT_VERSION = "1.9.99.248";
+	private static final String SCRIPT_VERSION = "1.9.99.249";
 	private static final String SETTINGS_PREFIX = "corp_";
 	private static final String DEFAULT_PROFILE = "default";
 	private CorpSettings settings = new CorpSettings();
@@ -17358,6 +17359,43 @@ public class Corp implements TribotScript {
         return found;
     }
 
+    // 1.9.99.249: canonical Corp drop table for the dual-pane loot GUI.
+    // Ordered by category for buyer scanability; not by drop rate. Buyer
+    // can add items outside this list via the "Add custom" field.
+    public static final String[] CORP_DROP_TABLE = {
+            // --- Uniques (always loot) ---
+            "Spectral sigil", "Arcane sigil", "Elysian sigil",
+            "Spirit shield", "Holy elixir",
+            // --- Half keys ---
+            "Loop half of key", "Tooth half of key",
+            // --- Dragon weapons ---
+            "Dragon dagger", "Dragon longsword", "Dragon mace", "Dragon med helm",
+            // --- Mystic robes ---
+            "Mystic hat", "Mystic robe top", "Mystic robe bottom",
+            "Mystic gloves", "Mystic boots",
+            // --- Bolts / arrows ---
+            "Onyx bolts (e)", "Diamond bolts (e)", "Dragon arrow",
+            // --- Rune armour ---
+            "Rune kiteshield",
+            // --- Grimy herbs (high value) ---
+            "Grimy ranarr weed", "Grimy snapdragon", "Grimy torstol",
+            // --- Grimy herbs (lower value) ---
+            "Grimy lantadyme", "Grimy kwuarm", "Grimy avantoe", "Grimy dwarf weed",
+            // --- Seeds ---
+            "Ranarr seed", "Snapdragon seed", "Watermelon seed",
+            // --- Runes ---
+            "Blood rune", "Death rune", "Soul rune", "Law rune",
+            "Nature rune", "Chaos rune", "Cosmic rune",
+            "Fire rune", "Water rune", "Earth rune",
+            // --- Ores / logs / planks ---
+            "Coal", "Mithril ore", "Adamant ore",
+            "Yew logs", "Magic logs", "Mahogany plank",
+            // --- Gems ---
+            "Uncut sapphire", "Uncut emerald", "Uncut ruby", "Uncut diamond",
+            // --- Junk you might want ---
+            "Pure essence", "Cannonball", "Coins", "Limpwurt root"
+    };
+
     // 1.9.99.247: quickstart preset names.
     public static final String PRESET_NONE = "(custom)";
     public static final String PRESET_SOLO_FANG = "Solo Fang";
@@ -17901,11 +17939,122 @@ public class Corp implements TribotScript {
                 supplyP.add(potionGroup);
                 tabs.addTab("Supplies", supplyP);
 
-                // --- Loot tab ---
-                JTextArea loot = new JTextArea(String.join("\n", settings.valuableLoot), 8, 20);
+                // --- Loot tab (1.9.99.249: dual-pane) ---
+                // Left: items the bot picks up. Right: items it ignores.
+                // Master list = CORP_DROP_TABLE; anything in settings.valuableLoot
+                // that's not in the master goes on the left as a custom entry.
+                DefaultListModel<String> lootModel = new DefaultListModel<>();
+                DefaultListModel<String> skipModel = new DefaultListModel<>();
+                JList<String> lootList = new JList<>(lootModel);
+                JList<String> skipList = new JList<>(skipModel);
+                lootList.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
+                skipList.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
+
+                Runnable populateLootLists = () -> {
+                    lootModel.clear();
+                    skipModel.clear();
+                    Set<String> looting = new LinkedHashSet<>(
+                            settings.valuableLoot == null ? Collections.emptyList()
+                                    : settings.valuableLoot);
+                    // Preserve buyer's order for the left list (sigils first, etc.).
+                    for (String item : looting) lootModel.addElement(item);
+                    // Right list = master entries not already on the left.
+                    for (String item : CORP_DROP_TABLE) {
+                        if (!looting.contains(item)) skipModel.addElement(item);
+                    }
+                };
+                populateLootLists.run();
+
+                JButton moveToLootBtn = new JButton("◄ Loot this");
+                JButton moveToSkipBtn = new JButton("Skip this ►");
+                JButton lootAllBtn = new JButton("◄◄ All");
+                JButton skipAllBtn = new JButton("All ►►");
+                moveToLootBtn.setToolTipText("Move selected item(s) from Skip → Loot");
+                moveToSkipBtn.setToolTipText("Move selected item(s) from Loot → Skip");
+                lootAllBtn.setToolTipText("Move everything in Skip → Loot");
+                skipAllBtn.setToolTipText("Move everything in Loot → Skip");
+
+                moveToLootBtn.addActionListener(e -> {
+                    for (String s : skipList.getSelectedValuesList()) {
+                        skipModel.removeElement(s);
+                        if (!lootModel.contains(s)) lootModel.addElement(s);
+                    }
+                });
+                moveToSkipBtn.addActionListener(e -> {
+                    for (String s : lootList.getSelectedValuesList()) {
+                        lootModel.removeElement(s);
+                        if (!skipModel.contains(s)) skipModel.addElement(s);
+                    }
+                });
+                lootAllBtn.addActionListener(e -> {
+                    for (int i = 0; i < skipModel.size(); i++) {
+                        String s = skipModel.get(i);
+                        if (!lootModel.contains(s)) lootModel.addElement(s);
+                    }
+                    skipModel.clear();
+                });
+                skipAllBtn.addActionListener(e -> {
+                    for (int i = 0; i < lootModel.size(); i++) {
+                        String s = lootModel.get(i);
+                        if (!skipModel.contains(s)) skipModel.addElement(s);
+                    }
+                    lootModel.clear();
+                });
+
+                JTextField customLootField = new JTextField(14);
+                JButton addCustomBtn = new JButton("Add custom →");
+                addCustomBtn.setToolTipText("Add an item not in the master drop table to the Loot list");
+                addCustomBtn.addActionListener(e -> {
+                    String name = customLootField.getText() == null ? "" : customLootField.getText().trim();
+                    if (name.isEmpty()) return;
+                    if (!lootModel.contains(name)) lootModel.addElement(name);
+                    skipModel.removeElement(name);
+                    customLootField.setText("");
+                });
+
+                JPanel lootLeftPanel = new JPanel(new BorderLayout());
+                lootLeftPanel.setBorder(BorderFactory.createTitledBorder("Loot these"));
+                lootLeftPanel.add(new JScrollPane(lootList), BorderLayout.CENTER);
+
+                JPanel lootRightPanel = new JPanel(new BorderLayout());
+                lootRightPanel.setBorder(BorderFactory.createTitledBorder("Skip these (full drop table)"));
+                lootRightPanel.add(new JScrollPane(skipList), BorderLayout.CENTER);
+
+                JPanel lootCenterButtons = new JPanel();
+                lootCenterButtons.setLayout(new BoxLayout(lootCenterButtons, BoxLayout.Y_AXIS));
+                lootCenterButtons.add(Box.createVerticalGlue());
+                moveToLootBtn.setAlignmentX(java.awt.Component.CENTER_ALIGNMENT);
+                moveToSkipBtn.setAlignmentX(java.awt.Component.CENTER_ALIGNMENT);
+                lootAllBtn.setAlignmentX(java.awt.Component.CENTER_ALIGNMENT);
+                skipAllBtn.setAlignmentX(java.awt.Component.CENTER_ALIGNMENT);
+                lootCenterButtons.add(moveToLootBtn);
+                lootCenterButtons.add(Box.createVerticalStrut(6));
+                lootCenterButtons.add(moveToSkipBtn);
+                lootCenterButtons.add(Box.createVerticalStrut(20));
+                lootCenterButtons.add(lootAllBtn);
+                lootCenterButtons.add(Box.createVerticalStrut(6));
+                lootCenterButtons.add(skipAllBtn);
+                lootCenterButtons.add(Box.createVerticalGlue());
+
+                JPanel lootSouth = new JPanel(new FlowLayout(FlowLayout.LEFT));
+                lootSouth.add(new JLabel("Custom item:"));
+                lootSouth.add(customLootField);
+                lootSouth.add(addCustomBtn);
+
+                JPanel lootCenter = new JPanel(new GridBagLayout());
+                java.awt.GridBagConstraints lc = new java.awt.GridBagConstraints();
+                lc.fill = java.awt.GridBagConstraints.BOTH;
+                lc.weighty = 1.0;
+                lc.gridy = 0;
+                lc.weightx = 0.45; lc.gridx = 0; lootCenter.add(lootLeftPanel, lc);
+                lc.weightx = 0.1;  lc.gridx = 1; lc.fill = java.awt.GridBagConstraints.NONE;
+                lootCenter.add(lootCenterButtons, lc);
+                lc.weightx = 0.45; lc.gridx = 2; lc.fill = java.awt.GridBagConstraints.BOTH;
+                lootCenter.add(lootRightPanel, lc);
+
                 JPanel lootP = new JPanel(new BorderLayout());
-                lootP.setBorder(BorderFactory.createTitledBorder("Valuable loot (one name per line)"));
-                lootP.add(new JScrollPane(loot), BorderLayout.CENTER);
+                lootP.add(lootCenter, BorderLayout.CENTER);
+                lootP.add(lootSouth, BorderLayout.SOUTH);
                 tabs.addTab("Loot", lootP);
 
                 // --- Profile row ---
@@ -17946,7 +18095,7 @@ public class Corp implements TribotScript {
                     designatedWorld.setValue(settings.designatedWorld);
                     w330MaxHostAttempts.setValue(Math.max(1, settings.w330MaxHostAttempts));
                     botList.setText(settings.botTeammates == null ? "" : String.join("\n", settings.botTeammates));
-                    loot.setText(String.join("\n", settings.valuableLoot));
+                    populateLootLists.run();
                     // 1.9.99.178: populate new fields
                     encroachTiles.setValue(Math.max(1, Math.min(8, settings.encroachmentRelocateTiles)));
                     phase1Target.setValue(Math.max(0, settings.phase1TargetSpecs));
@@ -18033,8 +18182,11 @@ public class Corp implements TribotScript {
                     settings.w330MaxHostAttempts = (Integer) w330MaxHostAttempts.getValue();
                     settings.botTeammates = Arrays.stream(botList.getText().split("\\R"))
                             .map(String::trim).filter(s -> !s.isEmpty()).collect(Collectors.toList());
-                    settings.valuableLoot = Arrays.stream(loot.getText().split("\\R"))
-                            .map(String::trim).filter(s -> !s.isEmpty()).collect(Collectors.toList());
+                    // 1.9.99.249: valuableLoot now comes from the left-pane list model.
+                    settings.valuableLoot = new ArrayList<>();
+                    for (int i = 0; i < lootModel.size(); i++) {
+                        settings.valuableLoot.add(lootModel.get(i));
+                    }
                     // Owned spec weapons are auto-detected at trip start —
                     // no GUI for them anymore.
                     // 1.9.99.245: accountRole assignment removed (field deleted).
