@@ -49,7 +49,7 @@ public class Corp implements TribotScript {
 	// adjacent to the affected code. This header used to inline ~1500
 	// lines of changelog (versions 1.9.90 — 1.9.99.85) but that bloated
 	// every script-token context; extracted in 1.9.99.241.
-	private static final String SCRIPT_VERSION = "1.9.99.246";
+	private static final String SCRIPT_VERSION = "1.9.99.247";
 	private static final String SETTINGS_PREFIX = "corp_";
 	private static final String DEFAULT_PROFILE = "default";
 	private CorpSettings settings = new CorpSettings();
@@ -17311,6 +17311,74 @@ public class Corp implements TribotScript {
 
     // ========== SETTINGS DIALOG ==========
 
+    // 1.9.99.247: quickstart preset names.
+    public static final String PRESET_NONE = "(custom)";
+    public static final String PRESET_SOLO_FANG = "Solo Fang";
+    public static final String PRESET_DUO_MAUL_ARCLIGHT = "Duo: Maul + Arclight";
+    public static final String PRESET_TRIO_BGS = "Trio: BGS finisher";
+    public static final String[] QUICKSTART_PRESETS = {
+            PRESET_NONE, PRESET_SOLO_FANG, PRESET_DUO_MAUL_ARCLIGHT, PRESET_TRIO_BGS
+    };
+
+    /** 1.9.99.247: build a CorpSettings configured for one of the named
+     *  presets. Goal: a fresh buyer picks the preset that matches their
+     *  setup, hits Apply, and only has to fill in friendName (if BOT_HOST)
+     *  and any RSN lists. Phase targets / spec floors are sensible defaults
+     *  for that team size; the buyer can still tweak after applying. */
+    private CorpSettings buildQuickstartPreset(String name) {
+        CorpSettings s = new CorpSettings();
+        if (PRESET_SOLO_FANG.equals(name)) {
+            s.mainWeapon = "Osmumten's fang";
+            s.coreKillerWeapon = "Elder maul";
+            s.foodNames = new String[]{ "Shark", "Cooked karambwan" };
+            s.useVengeance = false; // most solo accounts not on Lunar
+            s.pohSource = POH_SOURCE_OWN_HOUSE;
+            s.isPohHost = false;
+            s.coordinatorEnabled = false;
+            s.useCoordinatorPort = false;
+            s.autoDetectTeamSpecs = false; // solo — use this bot's own targets
+            s.phase1TargetSpecs = 4;
+            s.phase2TargetSpecs = 25;
+            s.phase3TargetBgsDamage = 400; // solo grinds the full phase 3
+            s.waitForTeammateSpec = false;
+        } else if (PRESET_DUO_MAUL_ARCLIGHT.equals(name)) {
+            s.mainWeapon = "Osmumten's fang";
+            s.coreKillerWeapon = "Elder maul";
+            s.foodNames = new String[]{ "Shark", "Cooked karambwan" };
+            s.useVengeance = true;
+            s.pohSource = POH_SOURCE_BOT_HOST;
+            s.isPohHost = false; // flip ON on one of the two bots
+            s.coordinatorEnabled = true;
+            s.useCoordinatorPort = true;
+            s.autoElectCoordinator = true;
+            s.autoDetectTeamSpecs = true; // team-wide aggregate
+            s.phase1TargetSpecs = 4;
+            s.phase2TargetSpecs = 20;
+            s.phase3TargetBgsDamage = 200;
+            s.waitForTeammateSpec = true;
+            s.pohOccupiedDelaySec = 5;
+            s.pohOccupiedMaxWaitSec = 30;
+        } else if (PRESET_TRIO_BGS.equals(name)) {
+            s.mainWeapon = "Osmumten's fang";
+            s.coreKillerWeapon = "Bandos godsword";
+            s.foodNames = new String[]{ "Shark", "Cooked karambwan" };
+            s.useVengeance = true;
+            s.pohSource = POH_SOURCE_BOT_HOST;
+            s.isPohHost = false;
+            s.coordinatorEnabled = true;
+            s.useCoordinatorPort = true;
+            s.autoElectCoordinator = true;
+            s.autoDetectTeamSpecs = true;
+            s.phase1TargetSpecs = 4;
+            s.phase2TargetSpecs = 20;
+            s.phase3TargetBgsDamage = 200; // shared across 3 — auto-divides
+            s.waitForTeammateSpec = true;
+            s.pohOccupiedDelaySec = 5;
+            s.pohOccupiedMaxWaitSec = 30;
+        }
+        return s;
+    }
+
     /** 1.9.99.244: validate settings before letting Start dismiss the dialog.
      *  Returns null when settings are usable, or a human-readable error
      *  string when something required is missing / wrong. */
@@ -17534,8 +17602,14 @@ public class Corp implements TribotScript {
                 JSpinner pohOccupiedMaxWait = new JSpinner(new SpinnerNumberModel(
                         Math.max(1, settings.pohOccupiedMaxWaitSec), 1, 120, 5));
 
-                JPanel teamP = new JPanel();
-                teamP.setLayout(new BoxLayout(teamP, BoxLayout.Y_AXIS));
+                // 1.9.99.247: POH / Team tab split into two — POH-related
+                // settings stay together; coordinator + multi-bot stagger +
+                // W330 + bot-teammate list move to a separate Coordinator tab.
+                // Solo buyers can ignore the second tab entirely.
+                JPanel pohP = new JPanel();
+                pohP.setLayout(new BoxLayout(pohP, BoxLayout.Y_AXIS));
+                JPanel coordP = new JPanel();
+                coordP.setLayout(new BoxLayout(coordP, BoxLayout.Y_AXIS));
 
                 // 1.9.99.245: tooltips on the POH / coordinator / stagger / W330 fields.
                 pohSource.setToolTipText("<html>OWN_HOUSE: this account's own house (needs ornate pool).<br>"
@@ -17612,7 +17686,8 @@ public class Corp implements TribotScript {
                         "<html><font size=2><i>RSNs of OTHER bot accounts you run with.<br>"
                         + "Used by the coordinator to share state with them.<br>"
                         + "Solo bot: leave empty.</i></font></html>");
-                JPanel teamLists = new JPanel(new GridLayout(1, 2, 6, 6));
+                // 1.9.99.247: panels constructed standalone — they now live on
+                // separate tabs (POH and Coordinator).
                 JPanel acceptablePanel = new JPanel(new BorderLayout());
                 acceptablePanel.setBorder(BorderFactory.createTitledBorder("Acceptable teammates (one RSN per line)"));
                 acceptablePanel.add(acceptableHelp, BorderLayout.NORTH);
@@ -17621,21 +17696,34 @@ public class Corp implements TribotScript {
                 botListPanel.setBorder(BorderFactory.createTitledBorder("Bot teammate RSNs (coordinator filter)"));
                 botListPanel.add(botListHelp, BorderLayout.NORTH);
                 botListPanel.add(new JScrollPane(botList), BorderLayout.CENTER);
-                teamLists.add(acceptablePanel);
-                teamLists.add(botListPanel);
 
-                teamP.add(pohGroup);
-                teamP.add(coordGroup);
-                teamP.add(staggerGroup);
-                teamP.add(w330Group);
-                teamP.add(teamLists);
-                // 1.9.99.245: wrap the densest tab in a scrollpane so it
-                // doesn't overflow on smaller screens (1366×768 laptops).
-                JScrollPane teamScroll = new JScrollPane(teamP,
+                // 1.9.99.247: POH tab = pohGroup + acceptable-teammates list.
+                // Acceptable teammates is the encroachment-relocate whitelist,
+                // conceptually about positioning at Corp, so it belongs here.
+                pohP.add(pohGroup);
+                JPanel acceptableWrap = new JPanel(new BorderLayout());
+                acceptableWrap.add(acceptablePanel, BorderLayout.CENTER);
+                pohP.add(acceptableWrap);
+                JScrollPane pohScroll = new JScrollPane(pohP,
                         JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
                         JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-                teamScroll.getVerticalScrollBar().setUnitIncrement(16);
-                tabs.addTab("POH / Team", teamScroll);
+                pohScroll.getVerticalScrollBar().setUnitIncrement(16);
+                tabs.addTab("POH", pohScroll);
+
+                // 1.9.99.247: Coordinator tab = coordGroup + stagger + W330
+                // + bot-teammate RSN list. Hidden from solo buyers who don't
+                // enable the coordinator anyway.
+                coordP.add(coordGroup);
+                coordP.add(staggerGroup);
+                coordP.add(w330Group);
+                JPanel botListWrap = new JPanel(new BorderLayout());
+                botListWrap.add(botListPanel, BorderLayout.CENTER);
+                coordP.add(botListWrap);
+                JScrollPane coordScroll = new JScrollPane(coordP,
+                        JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                        JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+                coordScroll.getVerticalScrollBar().setUnitIncrement(16);
+                tabs.addTab("Coordinator", coordScroll);
 
                 // --- Supplies tab (1.9.99.178) ---
                 JSpinner targetSharks = new JSpinner(new SpinnerNumberModel(
@@ -17684,6 +17772,13 @@ public class Corp implements TribotScript {
                 JButton resetBtn = new JButton("Reset defaults");
                 JButton helpBtn = new JButton("?");
                 helpBtn.setToolTipText("Open the script's GitHub page");
+                // 1.9.99.247: Quickstart preset dropdown + Apply button.
+                JComboBox<String> presetBox = new JComboBox<>(QUICKSTART_PRESETS);
+                presetBox.setSelectedItem(PRESET_NONE);
+                presetBox.setToolTipText("<html>Hard-coded starter configurations.<br>"
+                        + "Pick one and click Apply to fill the dialog with that preset's<br>"
+                        + "values, then tweak. Saved profiles are untouched.</html>");
+                JButton applyPresetBtn = new JButton("Apply");
 
                 Runnable populate = () -> {
                     mainWeapon.setSelectedItem(settings.mainWeapon);
@@ -17880,6 +17975,20 @@ public class Corp implements TribotScript {
                     settings = new CorpSettings();
                     populate.run();
                 });
+                // 1.9.99.247: Apply preset — replace the in-memory settings
+                // with one of the hard-coded quickstart configurations.
+                // Saved profiles on disk are untouched.
+                applyPresetBtn.addActionListener(e -> {
+                    String name = (String) presetBox.getSelectedItem();
+                    if (name == null || PRESET_NONE.equals(name)) return;
+                    int c = JOptionPane.showConfirmDialog(dlg,
+                            "Apply quickstart preset '" + name + "'?\n"
+                            + "(Replaces current dialog values; saved profiles untouched.)",
+                            "Apply preset", JOptionPane.YES_NO_OPTION);
+                    if (c != JOptionPane.YES_OPTION) return;
+                    settings = buildQuickstartPreset(name);
+                    populate.run();
+                });
                 // 1.9.99.246: Help button — open the script's GitHub page.
                 helpBtn.addActionListener(e -> {
                     try {
@@ -17911,6 +18020,8 @@ public class Corp implements TribotScript {
                 profileRow.add(renameBtn); profileRow.add(duplicateBtn);
                 profileRow.add(deleteBtn);
                 profileRow.add(new JLabel("   |   ")); // visual separator
+                profileRow.add(new JLabel("Quickstart:")); profileRow.add(presetBox); profileRow.add(applyPresetBtn);
+                profileRow.add(new JLabel("   |   "));
                 profileRow.add(resetBtn); profileRow.add(helpBtn);
 
                 JButton start = new JButton("Start");
