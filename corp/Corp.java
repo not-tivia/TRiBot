@@ -47,7 +47,7 @@ public class Corp implements TribotScript {
 	// adjacent to the affected code. This header used to inline ~1500
 	// lines of changelog (versions 1.9.90 — 1.9.99.85) but that bloated
 	// every script-token context; extracted in 1.9.99.241.
-	private static final String SCRIPT_VERSION = "1.9.99.244";
+	private static final String SCRIPT_VERSION = "1.9.99.245";
 	private static final String SETTINGS_PREFIX = "corp_";
 	private static final String DEFAULT_PROFILE = "default";
 	private CorpSettings settings = new CorpSettings();
@@ -14611,8 +14611,8 @@ public class Corp implements TribotScript {
         // ===== Per-account & multi-account coordination =====
         // Which spec weapons THIS account owns.
         public Map<String, Boolean> availableSpecWeapons = new LinkedHashMap<>();
-        // Role hint. "auto" means decide based on available weapons.
-        public String accountRole = "auto"; // auto | stat_drainer | finisher | dps
+        // 1.9.99.245: accountRole field removed — was hardcoded to "auto" with
+        // no GUI and no code reading it (only assignment was in collect.run()).
         // Bot teammates (RSNs of OTHER bot accounts you run with).
         public List<String> botTeammates = new ArrayList<>();
         // Coordinator toggle + tuning.
@@ -17363,9 +17363,14 @@ public class Corp implements TribotScript {
                 food2.setEditable(false);
                 food2.setSelectedItem(settings.foodNames.length > 1 ? settings.foodNames[1] : "Cooked karambwan");
                 JCheckBox useVengeance = new JCheckBox("Cast Vengeance (requires Lunars + runes)", settings.useVengeance);
+                useVengeance.setToolTipText("<html>Off if the account isn't on Lunar spellbook or<br>"
+                        + "doesn't have a rune pouch with the right runes.<br>"
+                        + "Vengeance roughly doubles spec-phase DPS at Corp.</html>");
                 JComboBox<String> combatPotion = new JComboBox<>(COMBAT_POTION_OPTIONS);
                 combatPotion.setEditable(true);
                 combatPotion.setSelectedItem(settings.combatPotionType);
+                // 1.9.99.245: overlay moved out of Combat tab (it's a display
+                // setting, not a combat one) — see the footer row below.
                 JCheckBox showOverlay = new JCheckBox("Show live status overlay window", settings.showOverlay);
                 JPanel combatP = new JPanel(new GridLayout(0, 2, 4, 4));
                 combatP.setBorder(BorderFactory.createTitledBorder("Combat"));
@@ -17375,7 +17380,6 @@ public class Corp implements TribotScript {
                 combatP.add(new JLabel("Food (secondary):"));  combatP.add(food2);
                 combatP.add(new JLabel("Vengeance:"));        combatP.add(useVengeance);
                 combatP.add(new JLabel("Combat potion:"));    combatP.add(combatPotion);
-                combatP.add(new JLabel("Status overlay:"));   combatP.add(showOverlay);
                 tabs.addTab("Combat", combatP);
 
                 // --- Spec tab ---
@@ -17418,23 +17422,51 @@ public class Corp implements TribotScript {
                 // separation within the same tab. User: "can you add dividers
                 // in swing between gui categories that are in the same tab
                 // but different settings areas".
+                // 1.9.99.245: tooltips + clearer labels with units.
+                corpMinHp.setToolTipText("<html>Corp's max HP is 2000.<br>"
+                        + "At HP below this, the bot stops dumping defense-reducer<br>"
+                        + "specs and commits to the kill phase. Default 1500 ≈ "
+                        + "Corp lost ~25%.</html>");
+                restoreCycles.setToolTipText("Safety upper bound on how many spec/restore loops "
+                        + "per kill. Termination is driven by phase targets, not this number.");
+                specDumpPanicHp.setToolTipText("<html>During the spec dump (spec weapon equipped, "
+                        + "phase incomplete), if your HP drops below this value the bot "
+                        + "eats a karambwan and teleports out.<br>"
+                        + "Default 35.</html>");
+                legacyDarkCore.setToolTipText("<html>Off (default): attack the dark core to kill it "
+                        + "mid-air with Elder Maul / DWH.<br>"
+                        + "On: legacy sidestep dodge (kept as fallback for accounts without "
+                        + "a viable core-killer weapon).</html>");
+                phase1Target.setToolTipText("Number of Elder Maul + Dragon Warhammer specs "
+                        + "to land before Phase 2 begins (defense reduction).");
+                phase2Target.setToolTipText("Number of Arclight + Darklight + Emberlight specs "
+                        + "to land in Phase 2 (demonic-damage reduction).");
+                phase3Target.setToolTipText("Total Bandos godsword damage drained in Phase 3 "
+                        + "before the kill commits.");
+                vengStopHp.setToolTipText("<html>Stop casting Vengeance once Corp HP falls "
+                        + "below this percent of full.<br>"
+                        + "Avoids wasting rune-pouch runes when Corp is dying anyway.</html>");
+                encroachTiles.setToolTipText("<html>If another player walks within this many "
+                        + "tiles (Chebyshev distance), the bot relocates.<br>"
+                        + "Default 3. Set higher to avoid teammates more aggressively.</html>");
+
                 JPanel specCore = new JPanel(new GridLayout(0, 2, 4, 4));
                 specCore.setBorder(BorderFactory.createTitledBorder("Spec floor & cycles"));
-                specCore.add(new JLabel("Spec only if Corp HP >=")); specCore.add(corpMinHp);
-                specCore.add(new JLabel("Restoration cycles per trip:")); specCore.add(restoreCycles);
-                specCore.add(new JLabel("Spec-dump panic tele HP <=:")); specCore.add(specDumpPanicHp);
-                specCore.add(new JLabel("Dark core strategy:")); specCore.add(legacyDarkCore);
+                specCore.add(new JLabel("Spec only if Corp HP ≥ (out of 2000):")); specCore.add(corpMinHp);
+                specCore.add(new JLabel("Restoration cycles per trip (safety cap):")); specCore.add(restoreCycles);
+                specCore.add(new JLabel("Panic-tele if HP ≤ during spec dump:")); specCore.add(specDumpPanicHp);
+                specCore.add(new JLabel("Dark core strategy (legacy fallback):")); specCore.add(legacyDarkCore);
 
                 JPanel specPhase = new JPanel(new GridLayout(0, 2, 4, 4));
                 specPhase.setBorder(BorderFactory.createTitledBorder("Phase targets"));
                 specPhase.add(autoDetectSpecs); specPhase.add(new JLabel(""));
-                specPhase.add(new JLabel("Phase 1 spec target (EM+DWH):")); specPhase.add(phase1Target);
-                specPhase.add(new JLabel("Phase 2 spec target (Arc/Dark/Ember):")); specPhase.add(phase2Target);
-                specPhase.add(new JLabel("Phase 3 BGS damage target:")); specPhase.add(phase3Target);
+                specPhase.add(new JLabel("Phase 1: Elder Maul + DWH specs:")); specPhase.add(phase1Target);
+                specPhase.add(new JLabel("Phase 2: Arclight / Darklight / Emberlight specs:")); specPhase.add(phase2Target);
+                specPhase.add(new JLabel("Phase 3: Bandos godsword damage drained:")); specPhase.add(phase3Target);
 
                 JPanel specMisc = new JPanel(new GridLayout(0, 2, 4, 4));
                 specMisc.setBorder(BorderFactory.createTitledBorder("Vengeance & positioning"));
-                specMisc.add(new JLabel("Vengeance stop Corp HP <=:")); specMisc.add(vengStopHp);
+                specMisc.add(new JLabel("Stop casting Vengeance when Corp HP ≤ (%):")); specMisc.add(vengStopHp);
                 specMisc.add(new JLabel("Relocate if teammate within (tiles):")); specMisc.add(encroachTiles);
 
                 JPanel specP = new JPanel();
@@ -17442,7 +17474,12 @@ public class Corp implements TribotScript {
                 specP.add(specCore);
                 specP.add(specPhase);
                 specP.add(specMisc);
-                tabs.addTab("Spec", specP);
+                // 1.9.99.245: scrollpane the Spec tab too (3 sub-panels).
+                JScrollPane specScroll = new JScrollPane(specP,
+                        JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                        JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+                specScroll.getVerticalScrollBar().setUnitIncrement(16);
+                tabs.addTab("Spec", specScroll);
 
                 // --- POH / Team tab ---
                 JTextField friendName = new JTextField(settings.friendName, 14);
@@ -17491,33 +17528,68 @@ public class Corp implements TribotScript {
                 JPanel teamP = new JPanel();
                 teamP.setLayout(new BoxLayout(teamP, BoxLayout.Y_AXIS));
 
+                // 1.9.99.245: tooltips on the POH / coordinator / stagger / W330 fields.
+                pohSource.setToolTipText("<html>OWN_HOUSE: this account's own house (needs ornate pool).<br>"
+                        + "FRIEND_HOUSE: enter a named friend's house via portal.<br>"
+                        + "BOT_HOST: resolve to whichever bot teammate has 'POH host role' on.<br>"
+                        + "W330_RANDOM: hop to W330, use a random advertiser at Rimmington.<br>"
+                        + "FEROX_ONLY: skip the POH — Ferox's Pool of Refreshment only.</html>");
+                friendName.setToolTipText("Required when POH source is FRIEND_HOUSE. "
+                        + "Used as the name typed into the house portal.");
+                isPohHost.setToolTipText("<html>Turn on if THIS bot owns the team's POH.<br>"
+                        + "Teammates with POH source = BOT_HOST will resolve to this bot's RSN.</html>");
+                waitForTeammateSpec.setToolTipText("Sit at the ornate pool until teammates also "
+                        + "have low spec, so the team refills together. Requires coordinator.");
+                coordEnabled.setToolTipText("Share state via a JSON file in the system temp dir. "
+                        + "Simple and reliable. Slower than the TCP option.");
+                useCoordPort.setToolTipText("<html>Share state over a TCP socket on port (45000 + Coord port ID).<br>"
+                        + "Real-time, no file I/O. Default for multi-bot setups.</html>");
+                autoElectCoord.setToolTipText("<html>First bot to start binds the TCP port as host; "
+                        + "later bots connect as clients.<br>"
+                        + "Works for loopback (same machine) and LAN/public IP.</html>");
+                coordPortId.setToolTipText("<html>The actual TCP port is 45000 + this number.<br>"
+                        + "Pick any 1-99. All bots in your team must use the same value.</html>");
+                coordHostIp.setToolTipText("Use 127.0.0.1 for same-machine bots. Use the host's "
+                        + "LAN or public IP for cross-machine setups.");
+                initialTripStagger.setToolTipText("Wait this many seconds before the first trip, "
+                        + "so multiple bots don't start the same kill simultaneously. Set 0 to disable.");
+                pohOccupiedDelay.setToolTipText("<html>When entering the ornate pool, if another player "
+                        + "is already inside the POH, wait this long before drinking.<br>"
+                        + "Naturally staggers return-to-Corp timing. Set 0 to disable.</html>");
+                pohOccupiedMaxWait.setToolTipText("Safety cap for the 'POH occupied' wait above. "
+                        + "Stop waiting and proceed after this many seconds.");
+                designatedWorld.setToolTipText("<html>World to hop back to after the W330 random "
+                        + "POH run.<br>0 = remember whichever world you were on before.</html>");
+                w330MaxHostAttempts.setToolTipText("How many random advertisers to try at Rimmington "
+                        + "before giving up on the restoration cycle for this kill.");
+
                 JPanel pohGroup = new JPanel(new GridLayout(0, 2, 4, 4));
                 pohGroup.setBorder(BorderFactory.createTitledBorder("POH"));
-                pohGroup.add(new JLabel("PoH source:"));        pohGroup.add(pohSource);
-                pohGroup.add(new JLabel("Friend's RSN:"));      pohGroup.add(friendName);
-                pohGroup.add(new JLabel("POH host role:"));     pohGroup.add(isPohHost);
-                pohGroup.add(new JLabel("Coordinator wait:"));  pohGroup.add(waitForTeammateSpec);
+                pohGroup.add(new JLabel("POH source:"));               pohGroup.add(pohSource);
+                pohGroup.add(new JLabel("Friend's RSN (if FRIEND_HOUSE):")); pohGroup.add(friendName);
+                pohGroup.add(new JLabel("This bot hosts the team POH:"));   pohGroup.add(isPohHost);
+                pohGroup.add(new JLabel("Wait at pool for teammates:"));    pohGroup.add(waitForTeammateSpec);
 
                 JPanel coordGroup = new JPanel(new GridLayout(0, 2, 4, 4));
                 coordGroup.setBorder(BorderFactory.createTitledBorder("Coordinator"));
-                coordGroup.add(new JLabel("Coordinator (file):")); coordGroup.add(coordEnabled);
-                coordGroup.add(new JLabel("Use TCP port coordinator:")); coordGroup.add(useCoordPort);
-                coordGroup.add(new JLabel("Auto-elect host:")); coordGroup.add(autoElectCoord);
+                coordGroup.add(new JLabel("Enable file coordinator:")); coordGroup.add(coordEnabled);
+                coordGroup.add(new JLabel("Use TCP coordinator (preferred):")); coordGroup.add(useCoordPort);
+                coordGroup.add(new JLabel("Auto-elect TCP host:")); coordGroup.add(autoElectCoord);
                 // 1.9.99.244: manual "Is coordinator host" hidden — auto-elect
                 // is always on by default and supersedes it.
-                coordGroup.add(new JLabel("Coord port ID (45000+ID):")); coordGroup.add(coordPortId);
-                coordGroup.add(new JLabel("Coord host IP:")); coordGroup.add(coordHostIp);
+                coordGroup.add(new JLabel("Coordinator port (45000 + this):")); coordGroup.add(coordPortId);
+                coordGroup.add(new JLabel("Host IP (127.0.0.1 = same machine):")); coordGroup.add(coordHostIp);
 
                 JPanel staggerGroup = new JPanel(new GridLayout(0, 2, 4, 4));
                 staggerGroup.setBorder(BorderFactory.createTitledBorder("Multi-bot stagger"));
-                staggerGroup.add(new JLabel("Initial trip stagger (sec):")); staggerGroup.add(initialTripStagger);
-                staggerGroup.add(new JLabel("POH occupied delay (sec, 0=off):")); staggerGroup.add(pohOccupiedDelay);
-                staggerGroup.add(new JLabel("POH occupied max wait (sec):")); staggerGroup.add(pohOccupiedMaxWait);
+                staggerGroup.add(new JLabel("Initial trip stagger (seconds):")); staggerGroup.add(initialTripStagger);
+                staggerGroup.add(new JLabel("Wait if POH occupied (seconds, 0=off):")); staggerGroup.add(pohOccupiedDelay);
+                staggerGroup.add(new JLabel("Max wait for occupied POH (seconds):")); staggerGroup.add(pohOccupiedMaxWait);
 
                 JPanel w330Group = new JPanel(new GridLayout(0, 2, 4, 4));
                 w330Group.setBorder(BorderFactory.createTitledBorder("W330 random POH"));
-                w330Group.add(new JLabel("W330 return world (0 = remember):")); w330Group.add(designatedWorld);
-                w330Group.add(new JLabel("W330 max host tries:")); w330Group.add(w330MaxHostAttempts);
+                w330Group.add(new JLabel("Return world after W330 (0 = remember):")); w330Group.add(designatedWorld);
+                w330Group.add(new JLabel("Max random advertisers to try:")); w330Group.add(w330MaxHostAttempts);
 
                 // 1.9.99.244: explanation labels above the two RSN lists so a
                 // fresh buyer knows what each is for. Without these, the lists
@@ -17547,7 +17619,13 @@ public class Corp implements TribotScript {
                 teamP.add(staggerGroup);
                 teamP.add(w330Group);
                 teamP.add(teamLists);
-                tabs.addTab("POH / Team", teamP);
+                // 1.9.99.245: wrap the densest tab in a scrollpane so it
+                // doesn't overflow on smaller screens (1366×768 laptops).
+                JScrollPane teamScroll = new JScrollPane(teamP,
+                        JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                        JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+                teamScroll.getVerticalScrollBar().setUnitIncrement(16);
+                tabs.addTab("POH / Team", teamScroll);
 
                 // --- Supplies tab (1.9.99.178) ---
                 JSpinner targetSharks = new JSpinner(new SpinnerNumberModel(
@@ -17699,7 +17777,7 @@ public class Corp implements TribotScript {
                             .map(String::trim).filter(s -> !s.isEmpty()).collect(Collectors.toList());
                     // Owned spec weapons are auto-detected at trip start —
                     // no GUI for them anymore.
-                    settings.accountRole = "auto";
+                    // 1.9.99.245: accountRole assignment removed (field deleted).
                 };
                 populate.run();
 
@@ -17731,9 +17809,16 @@ public class Corp implements TribotScript {
                     }
                 });
 
+                // 1.9.99.245: profile row now also shows the bytecode version
+                // banner. Without it, support tickets ("which version are you
+                // on?") require buyers to dig into TRiBot logs.
                 JPanel profileRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
                 profileRow.setBorder(BorderFactory.createTitledBorder("Profile"));
-                profileRow.add(new JLabel("Saved:")); profileRow.add(profileBox);
+                JLabel versionBanner = new JLabel("v" + SCRIPT_VERSION);
+                versionBanner.setForeground(new Color(80, 80, 80));
+                versionBanner.setToolTipText("Bytecode version. Include this in any bug report.");
+                profileRow.add(versionBanner);
+                profileRow.add(new JLabel("   |   Saved profile:")); profileRow.add(profileBox);
                 profileRow.add(loadBtn); profileRow.add(saveAsBtn); profileRow.add(deleteBtn);
 
                 JButton start = new JButton("Start");
@@ -17755,14 +17840,24 @@ public class Corp implements TribotScript {
                     dlg.dispose();
                 });
                 cancel.addActionListener(e -> dlg.dispose());
-                JPanel btns = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-                btns.add(start); btns.add(cancel);
+                // 1.9.99.245: footer row — overlay checkbox on the left (it's a
+                // display setting, not a combat one), Start/Cancel on the right.
+                JPanel btns = new JPanel(new BorderLayout());
+                JPanel leftFooter = new JPanel(new FlowLayout(FlowLayout.LEFT));
+                leftFooter.add(showOverlay);
+                JPanel rightFooter = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+                rightFooter.add(start); rightFooter.add(cancel);
+                btns.add(leftFooter, BorderLayout.WEST);
+                btns.add(rightFooter, BorderLayout.EAST);
 
                 dlg.setLayout(new BorderLayout());
                 dlg.add(profileRow, BorderLayout.NORTH);
                 dlg.add(tabs, BorderLayout.CENTER);
                 dlg.add(btns, BorderLayout.SOUTH);
                 dlg.pack();
+                // 1.9.99.245: resizable — default Swing pack on a dense tab
+                // overflows on 1366×768 laptops.
+                dlg.setResizable(true);
                 dlg.setLocationRelativeTo(null);
                 dlg.setVisible(true);
             });
