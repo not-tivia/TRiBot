@@ -14,11 +14,13 @@ import org.tribot.script.sdk.antiban.PlayerPreferences;
 import javax.swing.*;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Desktop;
 import java.awt.Font;
 import java.awt.FlowLayout;
 import java.awt.Frame;
 import java.awt.Graphics2D;
 import java.awt.GridLayout;
+import java.net.URI;
 import java.util.*;
 import java.util.stream.Collectors;
 import org.tribot.script.sdk.painting.Painting;
@@ -47,7 +49,7 @@ public class Corp implements TribotScript {
 	// adjacent to the affected code. This header used to inline ~1500
 	// lines of changelog (versions 1.9.90 — 1.9.99.85) but that bloated
 	// every script-token context; extracted in 1.9.99.241.
-	private static final String SCRIPT_VERSION = "1.9.99.245";
+	private static final String SCRIPT_VERSION = "1.9.99.246";
 	private static final String SETTINGS_PREFIX = "corp_";
 	private static final String DEFAULT_PROFILE = "default";
 	private CorpSettings settings = new CorpSettings();
@@ -17518,6 +17520,13 @@ public class Corp implements TribotScript {
                         Math.max(1, Math.min(99, settings.coordinatorPortId)), 1, 99, 1));
                 JTextField coordHostIp = new JTextField(
                         settings.coordinatorHostIp == null ? "127.0.0.1" : settings.coordinatorHostIp, 12);
+                // 1.9.99.246: coordinatorWriteIntervalTicks exposed in the GUI.
+                // 1 tick = ~600ms. Default 5 = ~3s between file-coord writes.
+                JSpinner coordWriteTicks = new JSpinner(new SpinnerNumberModel(
+                        Math.max(1, Math.min(60, settings.coordinatorWriteIntervalTicks)), 1, 60, 1));
+                coordWriteTicks.setToolTipText("<html>How often (in game ticks, ~600ms each) the file "
+                        + "coordinator writes our snapshot.<br>"
+                        + "Default 5 (≈3s). Lower = fresher state, more disk I/O.</html>");
                 JSpinner initialTripStagger = new JSpinner(new SpinnerNumberModel(
                         Math.max(0, settings.initialTripStaggerSec), 0, 120, 5));
                 JSpinner pohOccupiedDelay = new JSpinner(new SpinnerNumberModel(
@@ -17579,6 +17588,7 @@ public class Corp implements TribotScript {
                 // is always on by default and supersedes it.
                 coordGroup.add(new JLabel("Coordinator port (45000 + this):")); coordGroup.add(coordPortId);
                 coordGroup.add(new JLabel("Host IP (127.0.0.1 = same machine):")); coordGroup.add(coordHostIp);
+                coordGroup.add(new JLabel("File-coord write interval (ticks):")); coordGroup.add(coordWriteTicks);
 
                 JPanel staggerGroup = new JPanel(new GridLayout(0, 2, 4, 4));
                 staggerGroup.setBorder(BorderFactory.createTitledBorder("Multi-bot stagger"));
@@ -17667,7 +17677,13 @@ public class Corp implements TribotScript {
                 JComboBox<String> profileBox = new JComboBox<>(getProfileNames().toArray(new String[0]));
                 JButton loadBtn = new JButton("Load");
                 JButton saveAsBtn = new JButton("Save as...");
+                // 1.9.99.246: Rename + Duplicate + Reset defaults + Help.
+                JButton renameBtn = new JButton("Rename");
+                JButton duplicateBtn = new JButton("Duplicate");
                 JButton deleteBtn = new JButton("Delete");
+                JButton resetBtn = new JButton("Reset defaults");
+                JButton helpBtn = new JButton("?");
+                helpBtn.setToolTipText("Open the script's GitHub page");
 
                 Runnable populate = () -> {
                     mainWeapon.setSelectedItem(settings.mainWeapon);
@@ -17701,6 +17717,7 @@ public class Corp implements TribotScript {
                     autoElectCoord.setSelected(settings.autoElectCoordinator);
                     coordPortId.setValue(Math.max(1, Math.min(99, settings.coordinatorPortId)));
                     coordHostIp.setText(settings.coordinatorHostIp == null ? "127.0.0.1" : settings.coordinatorHostIp);
+                    coordWriteTicks.setValue(Math.max(1, Math.min(60, settings.coordinatorWriteIntervalTicks)));
                     initialTripStagger.setValue(Math.max(0, settings.initialTripStaggerSec));
                     pohOccupiedDelay.setValue(Math.max(0, settings.pohOccupiedDelaySec));
                     pohOccupiedMaxWait.setValue(Math.max(1, settings.pohOccupiedMaxWaitSec));
@@ -17750,6 +17767,7 @@ public class Corp implements TribotScript {
                     String ipText = coordHostIp.getText();
                     settings.coordinatorHostIp = ipText == null || ipText.trim().isEmpty()
                             ? "127.0.0.1" : ipText.trim();
+                    settings.coordinatorWriteIntervalTicks = (Integer) coordWriteTicks.getValue();
                     settings.initialTripStaggerSec = (Integer) initialTripStagger.getValue();
                     settings.pohOccupiedDelaySec = (Integer) pohOccupiedDelay.getValue();
                     settings.pohOccupiedMaxWaitSec = (Integer) pohOccupiedMaxWait.getValue();
@@ -17808,6 +17826,76 @@ public class Corp implements TribotScript {
                         refreshProfileBox(profileBox);
                     }
                 });
+                // 1.9.99.246: Rename — save current values under new name, then
+                // delete the old. Sequence is save-first so a failed save
+                // doesn't lose the profile.
+                renameBtn.addActionListener(e -> {
+                    String oldName = (String) profileBox.getSelectedItem();
+                    if (oldName == null || oldName.isEmpty()) return;
+                    String newName = JOptionPane.showInputDialog(dlg,
+                            "New name for '" + oldName + "':",
+                            "Rename Profile", JOptionPane.QUESTION_MESSAGE);
+                    if (newName == null || newName.trim().isEmpty()) return;
+                    newName = newName.trim();
+                    if (newName.equalsIgnoreCase(oldName)) return;
+                    if (getProfileNames().contains(newName)) {
+                        JOptionPane.showMessageDialog(dlg,
+                                "Profile '" + newName + "' already exists.",
+                                "Rename failed", JOptionPane.WARNING_MESSAGE);
+                        return;
+                    }
+                    collect.run();
+                    saveProfile(newName, settings);
+                    deleteProfile(oldName);
+                    refreshProfileBox(profileBox);
+                    profileBox.setSelectedItem(newName);
+                });
+                // 1.9.99.246: Duplicate — save current values under a new name,
+                // leave the original. Useful for "Solo Fang → Solo Fang (with veng)" forks.
+                duplicateBtn.addActionListener(e -> {
+                    String src = (String) profileBox.getSelectedItem();
+                    String suggest = (src == null || src.isEmpty()) ? "New profile" : src + " (copy)";
+                    String newName = JOptionPane.showInputDialog(dlg,
+                            "Name for the duplicate:", suggest);
+                    if (newName == null || newName.trim().isEmpty()) return;
+                    newName = newName.trim();
+                    if (getProfileNames().contains(newName)) {
+                        JOptionPane.showMessageDialog(dlg,
+                                "Profile '" + newName + "' already exists.",
+                                "Duplicate failed", JOptionPane.WARNING_MESSAGE);
+                        return;
+                    }
+                    collect.run();
+                    saveProfile(newName, settings);
+                    refreshProfileBox(profileBox);
+                    profileBox.setSelectedItem(newName);
+                });
+                // 1.9.99.246: Reset to defaults — fresh CorpSettings into the
+                // dialog. Confirms first since it nukes the buyer's tweaks.
+                resetBtn.addActionListener(e -> {
+                    int c = JOptionPane.showConfirmDialog(dlg,
+                            "Reset all settings on this tab to defaults?\n(Saved profiles are untouched.)",
+                            "Reset to defaults", JOptionPane.YES_NO_OPTION);
+                    if (c != JOptionPane.YES_OPTION) return;
+                    settings = new CorpSettings();
+                    populate.run();
+                });
+                // 1.9.99.246: Help button — open the script's GitHub page.
+                helpBtn.addActionListener(e -> {
+                    try {
+                        if (Desktop.isDesktopSupported()
+                                && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                            Desktop.getDesktop().browse(
+                                    new URI("https://github.com/not-tivia/TRiBot/tree/master/corp"));
+                        } else {
+                            JOptionPane.showMessageDialog(dlg,
+                                    "Open: https://github.com/not-tivia/TRiBot/tree/master/corp",
+                                    "Help", JOptionPane.INFORMATION_MESSAGE);
+                        }
+                    } catch (Exception ex) {
+                        Log.warn("Help button: " + ex.getMessage());
+                    }
+                });
 
                 // 1.9.99.245: profile row now also shows the bytecode version
                 // banner. Without it, support tickets ("which version are you
@@ -17819,7 +17907,11 @@ public class Corp implements TribotScript {
                 versionBanner.setToolTipText("Bytecode version. Include this in any bug report.");
                 profileRow.add(versionBanner);
                 profileRow.add(new JLabel("   |   Saved profile:")); profileRow.add(profileBox);
-                profileRow.add(loadBtn); profileRow.add(saveAsBtn); profileRow.add(deleteBtn);
+                profileRow.add(loadBtn); profileRow.add(saveAsBtn);
+                profileRow.add(renameBtn); profileRow.add(duplicateBtn);
+                profileRow.add(deleteBtn);
+                profileRow.add(new JLabel("   |   ")); // visual separator
+                profileRow.add(resetBtn); profileRow.add(helpBtn);
 
                 JButton start = new JButton("Start");
                 JButton cancel = new JButton("Cancel");
