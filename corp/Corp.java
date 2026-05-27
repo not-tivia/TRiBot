@@ -47,7 +47,7 @@ public class Corp implements TribotScript {
 	// adjacent to the affected code. This header used to inline ~1500
 	// lines of changelog (versions 1.9.90 — 1.9.99.85) but that bloated
 	// every script-token context; extracted in 1.9.99.241.
-	private static final String SCRIPT_VERSION = "1.9.99.243";
+	private static final String SCRIPT_VERSION = "1.9.99.244";
 	private static final String SETTINGS_PREFIX = "corp_";
 	private static final String DEFAULT_PROFILE = "default";
 	private CorpSettings settings = new CorpSettings();
@@ -151,14 +151,31 @@ public class Corp implements TribotScript {
     private static final String RUNE_POUCH = "Rune pouch";
     // Supported main-weapon options. The GUI offers these as a dropdown.
     // Variant expansion (e.g., Fang -> regular + (or)) lives in getMainWeaponVariants().
+    // 1.9.99.244: expanded from {Fang, Spear} to the full set of weapons
+    // a buyer might realistically use as the Corp main. Halberd / scythe
+    // family are 2H — isMainWeaponTwoHanded covers them. Variant expansion
+    // for ornament / charged forms lives in getMainWeaponVariants.
     public static final String[] MAIN_WEAPON_OPTIONS = {
             "Osmumten's fang",
-            // 1.9.99.148: Zamorakian spear option for the budget Corp setup
-            // (no defender / no DFS). 2H stab weapon, same combat options
-            // as fang. Variant expansion in getMainWeaponVariants() also
-            // matches "Zamorakian hasta" since the two are functionally
-            // identical at Corp and players often have one or the other.
-            "Zamorakian spear"
+            "Zamorakian spear",
+            "Noxious halberd",
+            "Scythe of vitur",
+            "Crystal halberd",
+            "Dragon halberd"
+    };
+
+    // 1.9.99.244: food whitelist for the GUI dropdowns. Combo-eat logic
+    // is keyed to "Cooked karambwan" specifically (see comboEatToFreeSlot),
+    // so karambwan should remain in the secondary slot for most setups.
+    public static final String[] FOOD_OPTIONS = {
+            "Shark",
+            "Cooked karambwan",
+            "Anglerfish",
+            "Manta ray",
+            "Cooked monkfish",
+            "Dark crab",
+            "Tuna potato",
+            "Saradomin brew(4)"
     };
     // Inventory target counts
     // Valuable loot to pick up
@@ -12724,15 +12741,21 @@ public class Corp implements TribotScript {
                 : settings.mainWeapon.trim();
         if (chosen.isEmpty()) chosen = "Osmumten's fang";
 
-        if (chosen.toLowerCase().contains("osmumten") && chosen.toLowerCase().contains("fang")) {
+        String lc = chosen.toLowerCase();
+        if (lc.contains("osmumten") && lc.contains("fang")) {
             return Arrays.asList("Osmumten's fang (or)", "Osmumten's fang");
         }
-        // 1.9.99.148: Zamorakian spear and Zamorakian hasta share the same
-        // combat stats / attack style and are interchangeable for our
-        // purposes. Match either if the user picked "Zamorakian spear".
-        String lc = chosen.toLowerCase();
+        // 1.9.99.148: Zamorakian spear / hasta share combat stats and
+        // attack style, treated as interchangeable.
         if (lc.contains("zamorakian") && (lc.contains("spear") || lc.contains("hasta"))) {
             return Arrays.asList("Zamorakian spear", "Zamorakian hasta");
+        }
+        // 1.9.99.244: scythe cosmetic variants (Holy / Sanguine) share stats.
+        if (lc.contains("scythe") && lc.contains("vitur")) {
+            return Arrays.asList(
+                    "Scythe of vitur",
+                    "Holy scythe of vitur",
+                    "Sanguine scythe of vitur");
         }
         return Collections.singletonList(chosen);
     }
@@ -12742,12 +12765,18 @@ public class Corp implements TribotScript {
      * Used to skip defender steps and to demand an extra inventory slot
      * before wielding the main weapon (a 2H wield sends both the previous
      * weapon AND any equipped defender / offhand back to inventory).
+     *
+     * 1.9.99.244: extended to halberds (Noxious / Crystal / Dragon) and
+     * scythe family — all 2H stab weapons playable as the Corp main.
      */
     private boolean isMainWeaponTwoHanded() {
         String chosen = settings == null || settings.mainWeapon == null
                 ? "" : settings.mainWeapon.trim().toLowerCase();
-        return chosen.contains("zamorakian")
-                && (chosen.contains("spear") || chosen.contains("hasta"));
+        if (chosen.contains("zamorakian")
+                && (chosen.contains("spear") || chosen.contains("hasta"))) return true;
+        if (chosen.contains("halberd")) return true;
+        if (chosen.contains("scythe")) return true;
+        return false;
     }
 
     /**
@@ -17280,6 +17309,25 @@ public class Corp implements TribotScript {
 
     // ========== SETTINGS DIALOG ==========
 
+    /** 1.9.99.244: validate settings before letting Start dismiss the dialog.
+     *  Returns null when settings are usable, or a human-readable error
+     *  string when something required is missing / wrong. */
+    private String validateSettingsForStart(CorpSettings s) {
+        if (s == null) return "Settings missing.";
+        if (s.mainWeapon == null || s.mainWeapon.trim().isEmpty()) {
+            return "Main weapon is required (Combat tab).";
+        }
+        if (s.foodNames == null || s.foodNames.length == 0
+                || s.foodNames[0] == null || s.foodNames[0].trim().isEmpty()) {
+            return "Primary food is required (Combat tab).";
+        }
+        if (POH_SOURCE_FRIEND_HOUSE.equals(s.pohSource)
+                && (s.friendName == null || s.friendName.trim().isEmpty())) {
+            return "POH source is set to FRIEND_HOUSE — Friend's RSN is required (POH / Team tab).";
+        }
+        return null;
+    }
+
     private boolean showSettingsDialog() {
         // Pre-load the default profile if it exists.
         CorpSettings preload = loadProfile(DEFAULT_PROFILE);
@@ -17292,19 +17340,28 @@ public class Corp implements TribotScript {
                 JTabbedPane tabs = new JTabbedPane();
 
                 // --- Combat tab ---
+                // 1.9.99.244: main weapon + core killer locked to whitelist.
+                // Free-text was an easy footgun (typos = silent equip failure).
                 JComboBox<String> mainWeapon = new JComboBox<>(MAIN_WEAPON_OPTIONS);
-                mainWeapon.setEditable(true);
+                mainWeapon.setEditable(false);
                 mainWeapon.setSelectedItem(settings.mainWeapon);
                 // 1.9.99.68: user-designated dark-core killer
                 JComboBox<String> coreKillerWeapon = new JComboBox<>(new String[]{
                         "Elder maul", "Dragon warhammer", "Bandos godsword",
                         "Noxious halberd", "Scythe of vitur", "Crystal halberd"
                 });
-                coreKillerWeapon.setEditable(true);
+                coreKillerWeapon.setEditable(false);
                 coreKillerWeapon.setSelectedItem(settings.coreKillerWeapon == null
                         ? "Elder maul" : settings.coreKillerWeapon);
-                JTextField food1 = new JTextField(settings.foodNames.length > 0 ? settings.foodNames[0] : "Shark", 14);
-                JTextField food2 = new JTextField(settings.foodNames.length > 1 ? settings.foodNames[1] : "Cooked karambwan", 14);
+                // 1.9.99.244: food fields → dropdowns. Free-text food names
+                // were case-sensitive and silently failed Inventory.contains
+                // when the buyer typed "shark" instead of "Shark".
+                JComboBox<String> food1 = new JComboBox<>(FOOD_OPTIONS);
+                food1.setEditable(false);
+                food1.setSelectedItem(settings.foodNames.length > 0 ? settings.foodNames[0] : "Shark");
+                JComboBox<String> food2 = new JComboBox<>(FOOD_OPTIONS);
+                food2.setEditable(false);
+                food2.setSelectedItem(settings.foodNames.length > 1 ? settings.foodNames[1] : "Cooked karambwan");
                 JCheckBox useVengeance = new JCheckBox("Cast Vengeance (requires Lunars + runes)", settings.useVengeance);
                 JComboBox<String> combatPotion = new JComboBox<>(COMBAT_POTION_OPTIONS);
                 combatPotion.setEditable(true);
@@ -17412,8 +17469,12 @@ public class Corp implements TribotScript {
                 // 1.9.99.178: coordinator port + stagger spinners.
                 JCheckBox useCoordPort = new JCheckBox(
                         "Use real-time port coordinator (TCP)", settings.useCoordinatorPort);
-                JCheckBox coordIsHost = new JCheckBox(
-                        "This bot is the coord host", settings.coordinatorIsHost);
+                // 1.9.99.244: coordIsHost (manual host election) hidden from
+                // the GUI. autoElectCoordinator has been the default for many
+                // versions and works for loopback + LAN + public-IP setups;
+                // the manual override is effectively dead UX. The field is
+                // kept in CorpSettings for back-compat with saved profiles
+                // (its value carries through populate/collect via settings).
                 JCheckBox autoElectCoord = new JCheckBox(
                         "Auto-elect host (first bot wins)", settings.autoElectCoordinator);
                 JSpinner coordPortId = new JSpinner(new SpinnerNumberModel(
@@ -17442,7 +17503,8 @@ public class Corp implements TribotScript {
                 coordGroup.add(new JLabel("Coordinator (file):")); coordGroup.add(coordEnabled);
                 coordGroup.add(new JLabel("Use TCP port coordinator:")); coordGroup.add(useCoordPort);
                 coordGroup.add(new JLabel("Auto-elect host:")); coordGroup.add(autoElectCoord);
-                coordGroup.add(new JLabel("Is coordinator host (manual):")); coordGroup.add(coordIsHost);
+                // 1.9.99.244: manual "Is coordinator host" hidden — auto-elect
+                // is always on by default and supersedes it.
                 coordGroup.add(new JLabel("Coord port ID (45000+ID):")); coordGroup.add(coordPortId);
                 coordGroup.add(new JLabel("Coord host IP:")); coordGroup.add(coordHostIp);
 
@@ -17457,12 +17519,25 @@ public class Corp implements TribotScript {
                 w330Group.add(new JLabel("W330 return world (0 = remember):")); w330Group.add(designatedWorld);
                 w330Group.add(new JLabel("W330 max host tries:")); w330Group.add(w330MaxHostAttempts);
 
+                // 1.9.99.244: explanation labels above the two RSN lists so a
+                // fresh buyer knows what each is for. Without these, the lists
+                // look identical and buyers paste the same RSNs into both.
+                JLabel acceptableHelp = new JLabel(
+                        "<html><font size=2><i>RSNs allowed near you in the boss room.<br>"
+                        + "Anyone else triggers the encroachment-relocate.<br>"
+                        + "Leave empty if soloing.</i></font></html>");
+                JLabel botListHelp = new JLabel(
+                        "<html><font size=2><i>RSNs of OTHER bot accounts you run with.<br>"
+                        + "Used by the coordinator to share state with them.<br>"
+                        + "Solo bot: leave empty.</i></font></html>");
                 JPanel teamLists = new JPanel(new GridLayout(1, 2, 6, 6));
                 JPanel acceptablePanel = new JPanel(new BorderLayout());
                 acceptablePanel.setBorder(BorderFactory.createTitledBorder("Acceptable teammates (one RSN per line)"));
+                acceptablePanel.add(acceptableHelp, BorderLayout.NORTH);
                 acceptablePanel.add(new JScrollPane(teammates), BorderLayout.CENTER);
                 JPanel botListPanel = new JPanel(new BorderLayout());
                 botListPanel.setBorder(BorderFactory.createTitledBorder("Bot teammate RSNs (coordinator filter)"));
+                botListPanel.add(botListHelp, BorderLayout.NORTH);
                 botListPanel.add(new JScrollPane(botList), BorderLayout.CENTER);
                 teamLists.add(acceptablePanel);
                 teamLists.add(botListPanel);
@@ -17518,8 +17593,8 @@ public class Corp implements TribotScript {
 
                 Runnable populate = () -> {
                     mainWeapon.setSelectedItem(settings.mainWeapon);
-                    food1.setText(settings.foodNames.length > 0 ? settings.foodNames[0] : "Shark");
-                    food2.setText(settings.foodNames.length > 1 ? settings.foodNames[1] : "Cooked karambwan");
+                    food1.setSelectedItem(settings.foodNames.length > 0 ? settings.foodNames[0] : "Shark");
+                    food2.setSelectedItem(settings.foodNames.length > 1 ? settings.foodNames[1] : "Cooked karambwan");
                     useVengeance.setSelected(settings.useVengeance);
                     combatPotion.setSelectedItem(settings.combatPotionType);
                     showOverlay.setSelected(settings.showOverlay);
@@ -17544,7 +17619,7 @@ public class Corp implements TribotScript {
                     autoDetectSpecs.setSelected(settings.autoDetectTeamSpecs);
                     vengStopHp.setValue(Math.max(0, Math.min(100, settings.corpLowHealthVengStop)));
                     useCoordPort.setSelected(settings.useCoordinatorPort);
-                    coordIsHost.setSelected(settings.coordinatorIsHost);
+                    // 1.9.99.244: coordIsHost no longer shown in GUI.
                     autoElectCoord.setSelected(settings.autoElectCoordinator);
                     coordPortId.setValue(Math.max(1, Math.min(99, settings.coordinatorPortId)));
                     coordHostIp.setText(settings.coordinatorHostIp == null ? "127.0.0.1" : settings.coordinatorHostIp);
@@ -17566,9 +17641,13 @@ public class Corp implements TribotScript {
                     settings.coreKillerWeapon = selectedCoreKiller == null
                             ? "Elder maul"
                             : selectedCoreKiller.toString().trim();
-                    String f1 = food1.getText().trim();
-                    String f2 = food2.getText().trim();
-                    settings.foodNames = f2.isEmpty() ? new String[]{ f1 } : new String[]{ f1, f2 };
+                    // 1.9.99.244: food fields are now JComboBox.
+                    Object f1Obj = food1.getSelectedItem();
+                    Object f2Obj = food2.getSelectedItem();
+                    String f1 = f1Obj == null ? "Shark" : f1Obj.toString().trim();
+                    String f2 = f2Obj == null ? "" : f2Obj.toString().trim();
+                    settings.foodNames = (f2.isEmpty() || f1.equals(f2))
+                            ? new String[]{ f1 } : new String[]{ f1, f2 };
                     settings.useVengeance = useVengeance.isSelected();
                     Object selectedPotion = combatPotion.getSelectedItem();
                     settings.combatPotionType = selectedPotion == null
@@ -17587,7 +17666,7 @@ public class Corp implements TribotScript {
                     settings.autoDetectTeamSpecs = autoDetectSpecs.isSelected();
                     settings.corpLowHealthVengStop = (Integer) vengStopHp.getValue();
                     settings.useCoordinatorPort = useCoordPort.isSelected();
-                    settings.coordinatorIsHost = coordIsHost.isSelected();
+                    // 1.9.99.244: settings.coordinatorIsHost preserved as-is from saved profile.
                     settings.autoElectCoordinator = autoElectCoord.isSelected();
                     settings.coordinatorPortId = (Integer) coordPortId.getValue();
                     String ipText = coordHostIp.getText();
@@ -17661,6 +17740,16 @@ public class Corp implements TribotScript {
                 JButton cancel = new JButton("Cancel");
                 start.addActionListener(e -> {
                     collect.run();
+                    // 1.9.99.244: required-field validation on Start. Pre-1.9.99.244
+                    // the dialog accepted any state and the bot crashed mid-flow
+                    // (FRIEND_HOUSE with empty friendName failed at the POH portal;
+                    // blank main weapon failed at equip).
+                    String validationError = validateSettingsForStart(settings);
+                    if (validationError != null) {
+                        JOptionPane.showMessageDialog(dlg, validationError,
+                                "Settings incomplete", JOptionPane.ERROR_MESSAGE);
+                        return; // don't dispose, let buyer fix it
+                    }
                     saveProfile(DEFAULT_PROFILE, settings);
                     ok[0] = true;
                     dlg.dispose();
