@@ -47,7 +47,7 @@ public class Corp implements TribotScript {
 	// adjacent to the affected code. This header used to inline ~1500
 	// lines of changelog (versions 1.9.90 — 1.9.99.85) but that bloated
 	// every script-token context; extracted in 1.9.99.241.
-	private static final String SCRIPT_VERSION = "1.9.99.241";
+	private static final String SCRIPT_VERSION = "1.9.99.242";
 	private static final String SETTINGS_PREFIX = "corp_";
 	private static final String DEFAULT_PROFILE = "default";
 	private CorpSettings settings = new CorpSettings();
@@ -2905,7 +2905,7 @@ public class Corp implements TribotScript {
                 // use our fang even after banking."
 
                 // Brief wait before trying again
-                Waiting.waitUniform(1000, 2000);
+                Waiting.waitNormal(1500, 250);
             }
         }
     }
@@ -2921,7 +2921,7 @@ public class Corp implements TribotScript {
             Log.info("Already in deep Corp area, checking for Corp visibility");
 
             // Brief wait to check if Corp becomes visible from current position
-            Waiting.waitUniform(500, 1000);
+            Waiting.waitNormal(750, 125);
 
             if (Query.npcs().nameEquals(CORPOREAL_BEAST).findFirst().isPresent()) {
                 Log.info("Corp now visible from deep area position");
@@ -3076,8 +3076,13 @@ public class Corp implements TribotScript {
         }
 
         // Method 3: Fallback - check if we're in melee range and Corp is facing us
+        // 1.9.99.242: NPE guard. corp.getTile() and MyPlayer.getTile()
+        // can return null transiently (NPC mid-despawn, player loading);
+        // pre-fix any null dereferenced into NPE since the next line
+        // immediately called .distanceTo() on them.
         WorldTile myPos = MyPlayer.getTile();
         WorldTile corpPos = corp.getTile();
+		if (myPos == null || corpPos == null) return false;
 		// We're in melee range, assume we might be targeted
 		return myPos.distanceTo(corpPos) <= 1;
 	}
@@ -3109,7 +3114,9 @@ public class Corp implements TribotScript {
             Npc corp = corpOpt.get();
             WorldTile corpPos = corp.getTile();
             WorldTile myPos = MyPlayer.getTile();
-
+            // 1.9.99.242: NPE guard — myPos.distanceTo(corpPos) below NPEs
+            // if either is null (transient NPC despawn / loading).
+            if (corpPos == null || myPos == null) return false;
             Log.info("Corp found at: " + corpPos + " (distance: " + myPos.distanceTo(corpPos) + ")");
 
             // Check if Corp is in the deep area or nearby
@@ -7964,7 +7971,7 @@ public class Corp implements TribotScript {
         // STOMP DEFENSE started spinning.
         try {
             Area corpArea = corp.getArea();
-            if (corpArea != null && myPos != null && corpArea.contains(myPos)) {
+            if (corpArea != null && myPos != null && isInsideCorpHitbox(myPos, corpArea)) {
                 return false; // inside hitbox = NOT a good position
             }
         } catch (Exception ignored) {}
@@ -8187,7 +8194,7 @@ public class Corp implements TribotScript {
 					Waiting.waitUntil(8000, () -> {
 						WorldTile cur = MyPlayer.getTile();
 						if (cur == null) return false;
-						if (corpArea.contains(cur)) return false;
+						if (isInsideCorpHitbox(cur, corpArea)) return false;
 						if (cur.distanceTo(corner) <= 1) return true;
 						return !lineCrossesCorp(cur, bestPosition, corpArea);
 					});
@@ -8435,7 +8442,7 @@ public class Corp implements TribotScript {
 		// stuck inside Corp for ~50 seconds eating non-stop while
 		// walkToSafeCoreMeleeTile spammed "didn't reach a safe melee
 		// tile by arrival" forever.
-		if (corpArea.contains(myPos)) {
+		if (isInsideCorpHitbox(myPos, corpArea)) {
 			Log.warn("walkToSafeCoreMeleeTile: bot is INSIDE Corp's hitbox at "
 					+ myPos + " — stepping off first (skipping core attack this tick)");
 			stepOffCorp(corp);
@@ -9048,24 +9055,12 @@ public class Corp implements TribotScript {
 		return isMainWeaponEquipped();
 	}
 
-	private boolean isPositionSafeFromCorp(WorldTile position, Npc corp) {
-		WorldTile corpPos = corp.getTile();
-		double distance = position.distanceTo(corpPos);
+	// 1.9.99.242: REMOVED dead isPositionSafeFromCorp (no callers per audit).
+	//   Bug it had: used corp.getTile() which is Corp's SW corner, NOT
+	//   center, so distance < 5 check was systematically off by ~2 in the
+	//   SW direction. Was also obsoleted by getDistanceToCorpHitboxEdge
+	//   (which 1.9.99.26 had already fixed to use corp.getArea().getCenter()).
 
-		// Must be at least 5 tiles from Corp (not 3!)
-		if (distance < 5) {
-			Log.warn("Position too close to Corp: " + position + " (distance: " + distance + ")");
-			return false;
-		}
-
-		// Must be within attack range but not melee range
-		if (distance > MAX_ATTACK_DISTANCE_FROM_CORP) {
-			Log.warn("Position too far from Corp: " + position + " (distance: " + distance + ")");
-			return false;
-		}
-
-		return true;
-	}
 
 	// Updated for 5x5 Corp
 	private static final int SAFE_DISTANCE_FROM_CORP_EDGE = 4;  // 4 tiles from hitbox edge
@@ -10572,7 +10567,7 @@ public class Corp implements TribotScript {
             }
 
             // Random delay between withdrawals
-            Waiting.waitUniform(200, 600);
+            Waiting.waitNormal(400, 100);
         }
 
         return true; // Always return true, let individual methods handle failures
@@ -10674,7 +10669,7 @@ public class Corp implements TribotScript {
             }
 
             // Random delay between withdrawals
-            Waiting.waitUniform(300, 800);
+            Waiting.waitNormal(550, 130);
         }
 
         return true;
@@ -10736,7 +10731,7 @@ public class Corp implements TribotScript {
                 if (!withdrawSharks(amount)) return false;
             }
             firstFood = false;
-            Waiting.waitUniform(400, 900);
+            Waiting.waitNormal(650, 130);
         }
         return true;
     }
@@ -11664,9 +11659,14 @@ public class Corp implements TribotScript {
      * Wait for health to increase after eating
      */
     private boolean waitForHealthIncrease() {
+        // 1.9.99.242: shrunk from 3000ms to 700ms (~1 game tick). The 3s
+        // wait blocked the main loop during FIGHTING_CORP — if the eat
+        // failed to register (HP already at max, click dropped, etc) the
+        // bot took up to two full Corp swings (~30 each) before main
+        // loop regained control and could fire emergency-eat / panic-tele.
+        // One tick (600-700ms) is enough for the HP packet to deliver.
         int healthBefore = MyPlayer.getCurrentHealth();
-
-        return Waiting.waitUntil(3000, () ->
+        return Waiting.waitUntil(700, () ->
                 MyPlayer.getCurrentHealth() > healthBefore);
     }
 
@@ -11699,7 +11699,11 @@ public class Corp implements TribotScript {
                 int currentPrayer = Prayer.getPrayerPoints();
 
                 if (prayerPot.click("Drink")) {
-                    boolean prayerIncreased = Waiting.waitUntil(3000, () ->
+                    // 1.9.99.242: 3000ms -> 700ms (~1 game tick). Same
+                    // problem as waitForHealthIncrease — 3s of blocking
+                    // during FIGHTING_CORP let two Corp swings land
+                    // before main loop regained control.
+                    boolean prayerIncreased = Waiting.waitUntil(700, () ->
                             Prayer.getPrayerPoints() > currentPrayer);
 
                     if (prayerIncreased) {
@@ -16557,13 +16561,34 @@ public class Corp implements TribotScript {
     private int corpUnderConsecutiveChecks = 0;
     private static final int UNDER_CORP_CONFIRM_CHECKS = 2;
 
+    /** 1.9.99.242: trusted "is this tile inside Corp's 5x5 hitbox?" check.
+     *  The SDK's `Area.contains()` returns FALSE for tiles that visibly
+     *  fall inside Corp's hitbox (documented in 1.9.99.64 — lineCrossesCorp
+     *  worked around this with explicit ±2 from center bounds; everything
+     *  else in the codebase trusted the broken SDK). Three places used to
+     *  check "under Corp" with three different implementations: isUnderCorp
+     *  (SDK + stability gate), inline `corpArea.contains(myPos)` (SDK, no
+     *  gate), and `lineCrossesCorp`'s explicit ±2 (trusted). Unified here:
+     *  every "under Corp" check now goes through this helper, which uses
+     *  the trusted ±2-from-center logic. */
+    private boolean isInsideCorpHitbox(WorldTile pos, Area corpArea) {
+        if (pos == null || corpArea == null) return false;
+        WorldTile center = corpArea.getCenter();
+        if (center == null) return false;
+        int dx = pos.getX() - center.getX();
+        int dy = pos.getY() - center.getY();
+        return Math.abs(dx) <= 2 && Math.abs(dy) <= 2 && pos.getPlane() == center.getPlane();
+    }
+
     private boolean isUnderCorp(Npc corp) {
         if (corp == null) { corpUnderConsecutiveChecks = 0; return false; }
         try {
             WorldTile myPos = MyPlayer.getTile();
             if (myPos == null) { corpUnderConsecutiveChecks = 0; return false; }
             Area corpArea = corp.getArea();
-            boolean overlapNow = corpArea != null && corpArea.contains(myPos);
+            // 1.9.99.242: use the trusted ±2 bounds check instead of the
+            // SDK's unreliable corpArea.contains(myPos).
+            boolean overlapNow = isInsideCorpHitbox(myPos, corpArea);
             if (!overlapNow) {
                 corpUnderConsecutiveChecks = 0;
                 return false;
