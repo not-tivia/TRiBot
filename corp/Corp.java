@@ -20,6 +20,8 @@ import java.awt.FlowLayout;
 import java.awt.Frame;
 import java.awt.Graphics2D;
 import java.awt.GridLayout;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.URI;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -49,7 +51,7 @@ public class Corp implements TribotScript {
 	// adjacent to the affected code. This header used to inline ~1500
 	// lines of changelog (versions 1.9.90 — 1.9.99.85) but that bloated
 	// every script-token context; extracted in 1.9.99.241.
-	private static final String SCRIPT_VERSION = "1.9.99.247";
+	private static final String SCRIPT_VERSION = "1.9.99.248";
 	private static final String SETTINGS_PREFIX = "corp_";
 	private static final String DEFAULT_PROFILE = "default";
 	private CorpSettings settings = new CorpSettings();
@@ -17311,6 +17313,51 @@ public class Corp implements TribotScript {
 
     // ========== SETTINGS DIALOG ==========
 
+    /** 1.9.99.248: scan Inventory + Equipment for one of the supported main
+     *  weapons. Returns the canonical MAIN_WEAPON_OPTIONS entry, or null. */
+    private String detectMainWeaponFromGear() {
+        for (String option : MAIN_WEAPON_OPTIONS) {
+            // Temporarily set the chosen weapon to use getMainWeaponVariants —
+            // but that reads settings, so build variant lists inline.
+            String[] variants = expandWeaponVariants(option);
+            for (String v : variants) {
+                if (Inventory.contains(v) || Equipment.contains(v)) return option;
+            }
+        }
+        return null;
+    }
+
+    /** 1.9.99.248: variant expansion for one of the MAIN_WEAPON_OPTIONS
+     *  entries, parallel to getMainWeaponVariants but independent of
+     *  settings.mainWeapon. */
+    private String[] expandWeaponVariants(String canonical) {
+        String lc = canonical.toLowerCase();
+        if (lc.contains("osmumten") && lc.contains("fang")) {
+            return new String[]{ "Osmumten's fang (or)", "Osmumten's fang" };
+        }
+        if (lc.contains("zamorakian")) {
+            return new String[]{ "Zamorakian spear", "Zamorakian hasta" };
+        }
+        if (lc.contains("scythe")) {
+            return new String[]{
+                "Scythe of vitur", "Holy scythe of vitur", "Sanguine scythe of vitur"
+            };
+        }
+        return new String[]{ canonical };
+    }
+
+    /** 1.9.99.248: real-time scan of Inventory + Equipment for each entry in
+     *  ALL_SPEC_WEAPONS. Independent of the runtime cache used by
+     *  getOwnedSpecWeapons (which falls back to settings if nothing found —
+     *  not what the GUI Detect button wants). */
+    private List<String> detectSpecWeaponsFromGear() {
+        List<String> found = new ArrayList<>();
+        for (String w : ALL_SPEC_WEAPONS) {
+            if (Inventory.contains(w) || Equipment.contains(w)) found.add(w);
+        }
+        return found;
+    }
+
     // 1.9.99.247: quickstart preset names.
     public static final String PRESET_NONE = "(custom)";
     public static final String PRESET_SOLO_FANG = "Solo Fang";
@@ -17450,6 +17497,54 @@ public class Corp implements TribotScript {
                 combatP.add(new JLabel("Food (secondary):"));  combatP.add(food2);
                 combatP.add(new JLabel("Vengeance:"));        combatP.add(useVengeance);
                 combatP.add(new JLabel("Combat potion:"));    combatP.add(combatPotion);
+
+                // 1.9.99.248: Detect-from-inventory button + owned spec
+                // weapons readonly display. Buyer logs in, clicks Detect,
+                // mainWeapon dropdown auto-fills + the spec list shows
+                // what the bot found. Avoids 5+ manual fields on first run.
+                JButton detectBtn = new JButton("Detect gear from inventory");
+                detectBtn.setToolTipText("<html>Scan your worn + carried items for a supported<br>"
+                        + "main weapon and the bot-recognized spec weapons.<br>"
+                        + "Requires you to be logged into the game first.</html>");
+                JLabel detectedSpecs = new JLabel("Owned spec weapons: (not yet detected)");
+                detectedSpecs.setForeground(new Color(80, 80, 80));
+                detectBtn.addActionListener(e -> {
+                    if (!Login.isLoggedIn()) {
+                        JOptionPane.showMessageDialog(dlg,
+                                "Log into the game first, then click Detect again.\n"
+                                + "(The button reads your inventory + equipment to fill the fields.)",
+                                "Not logged in", JOptionPane.WARNING_MESSAGE);
+                        return;
+                    }
+                    String mw = detectMainWeaponFromGear();
+                    List<String> specs = detectSpecWeaponsFromGear();
+                    StringBuilder summary = new StringBuilder("<html>");
+                    if (mw != null) {
+                        mainWeapon.setSelectedItem(mw);
+                        summary.append("Main weapon: <b>").append(mw).append("</b><br>");
+                    } else {
+                        summary.append("Main weapon: <i>none of the supported options found</i><br>");
+                    }
+                    if (specs.isEmpty()) {
+                        detectedSpecs.setText("Owned spec weapons: (none found)");
+                        summary.append("Spec weapons: <i>none found</i>");
+                    } else {
+                        detectedSpecs.setText("Owned spec weapons: " + String.join(", ", specs));
+                        summary.append("Spec weapons: <b>").append(String.join(", ", specs)).append("</b>");
+                        // Update the settings map so saveProfile carries it.
+                        if (settings.availableSpecWeapons == null) {
+                            settings.availableSpecWeapons = new LinkedHashMap<>();
+                        }
+                        for (String w : ALL_SPEC_WEAPONS) {
+                            settings.availableSpecWeapons.put(w, specs.contains(w));
+                        }
+                    }
+                    summary.append("</html>");
+                    JOptionPane.showMessageDialog(dlg, summary.toString(),
+                            "Detection results", JOptionPane.INFORMATION_MESSAGE);
+                });
+                combatP.add(new JLabel("Auto-detect:")); combatP.add(detectBtn);
+                combatP.add(new JLabel("")); combatP.add(detectedSpecs);
                 tabs.addTab("Combat", combatP);
 
                 // --- Spec tab ---
@@ -17663,6 +17758,58 @@ public class Corp implements TribotScript {
                 coordGroup.add(new JLabel("Coordinator port (45000 + this):")); coordGroup.add(coordPortId);
                 coordGroup.add(new JLabel("Host IP (127.0.0.1 = same machine):")); coordGroup.add(coordHostIp);
                 coordGroup.add(new JLabel("File-coord write interval (ticks):")); coordGroup.add(coordWriteTicks);
+
+                // 1.9.99.248: TCP test-connection button. Opens a 2-second
+                // socket to the host+port and reports reachable/unreachable.
+                // Used to sanity-check the coordinator setup before clicking
+                // Start. The actual coord protocol is not exercised — just
+                // "is something accepting connections."
+                JButton testConnBtn = new JButton("Test TCP connection");
+                testConnBtn.setToolTipText("<html>Opens a 2-second connection probe to "
+                        + "the host IP + port (45000 + Coord port ID).<br>"
+                        + "Passes if a coordinator is already listening there. "
+                        + "If you're the first bot in the team and<br>"
+                        + "auto-elect is on, this will fail — that's fine, you'll be the host.</html>");
+                testConnBtn.addActionListener(e -> {
+                    final String host = coordHostIp.getText() == null ? "127.0.0.1"
+                            : coordHostIp.getText().trim();
+                    final int port = 45000 + (Integer) coordPortId.getValue();
+                    testConnBtn.setEnabled(false);
+                    testConnBtn.setText("Testing " + host + ":" + port + "...");
+                    new SwingWorker<String, Void>() {
+                        @Override
+                        protected String doInBackground() {
+                            try (Socket s = new Socket()) {
+                                s.connect(new InetSocketAddress(host, port), 2000);
+                                return "OK";
+                            } catch (Exception ex) {
+                                return ex.getClass().getSimpleName() + ": " + ex.getMessage();
+                            }
+                        }
+                        @Override
+                        protected void done() {
+                            testConnBtn.setEnabled(true);
+                            testConnBtn.setText("Test TCP connection");
+                            String result;
+                            try { result = get(); }
+                            catch (Exception ex) { result = "(thread error: " + ex.getMessage() + ")"; }
+                            if ("OK".equals(result)) {
+                                JOptionPane.showMessageDialog(dlg,
+                                        "Reachable. Something is listening on "
+                                                + host + ":" + port + ".",
+                                        "Test connection", JOptionPane.INFORMATION_MESSAGE);
+                            } else {
+                                JOptionPane.showMessageDialog(dlg,
+                                        "No coordinator at " + host + ":" + port + ".\n"
+                                                + result + "\n\n"
+                                                + "If you're the first bot in the team and "
+                                                + "auto-elect is on, this is expected — you'll be the host.",
+                                        "Test connection", JOptionPane.WARNING_MESSAGE);
+                            }
+                        }
+                    }.execute();
+                });
+                coordGroup.add(new JLabel("Sanity check:")); coordGroup.add(testConnBtn);
 
                 JPanel staggerGroup = new JPanel(new GridLayout(0, 2, 4, 4));
                 staggerGroup.setBorder(BorderFactory.createTitledBorder("Multi-bot stagger"));
