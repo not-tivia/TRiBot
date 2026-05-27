@@ -47,7 +47,7 @@ public class Corp implements TribotScript {
 	// adjacent to the affected code. This header used to inline ~1500
 	// lines of changelog (versions 1.9.90 — 1.9.99.85) but that bloated
 	// every script-token context; extracted in 1.9.99.241.
-	private static final String SCRIPT_VERSION = "1.9.99.242";
+	private static final String SCRIPT_VERSION = "1.9.99.243";
 	private static final String SETTINGS_PREFIX = "corp_";
 	private static final String DEFAULT_PROFILE = "default";
 	private CorpSettings settings = new CorpSettings();
@@ -1600,6 +1600,12 @@ public class Corp implements TribotScript {
 		initializeCameraSetup();
 		scriptStartTime = System.currentTimeMillis();
 		overlayInit();
+		// 1.9.99.243: register TRiBot lifecycle hooks (break manager, pause,
+		// script stop). Without these, if the user enables breaks or hits
+		// the Stop button externally, our heartbeat thread keeps publishing
+		// stale snapshots while we're logged out — teammates see a "live"
+		// participant that never contributes hits, gating kill detection.
+		registerScriptListeners();
 		// 1.9.99.201: background heartbeat thread keeps our coord publish fresh
 		// even when the main loop is stuck in a long Waiting.waitUntil sequence
 		// (bank, POH portal, walks). See coordinatorHeartbeat for details.
@@ -15583,6 +15589,69 @@ public class Corp implements TribotScript {
         ACTIVE_HEARTBEAT_ALIVE.set(false);
         if (t == ACTIVE_HEARTBEAT_THREAD) ACTIVE_HEARTBEAT_THREAD = null;
         if (t != null) t.interrupt();
+    }
+
+    /** 1.9.99.243: TRiBot lifecycle hooks. Called once from execute() right
+     *  before the heartbeat thread spawns.
+     *
+     *  Why these matter for a sellable script: TRiBot's break manager will
+     *  log the account out for N minutes mid-trip. The Pause button does
+     *  the same in-place. Externally clicking Stop terminates the script
+     *  thread without giving the main loop a chance to clean up.
+     *
+     *  Without lifecycle hooks:
+     *   - heartbeat thread keeps publishing our snapshot at 3s cadence
+     *     while we're logged out — for the first 30s after we leave,
+     *     teammates' INTERNAL_COORD_STALE_THRESHOLD_MS filter still sees
+     *     us as live, so they keep waiting for hits / claiming around us
+     *   - port-coordinator socket may stay open holding a port
+     *   - on next script start, zombie threads from the previous run
+     *     compete with new ones
+     *
+     *  We attach to:
+     *   - PreBreakStart: just a log so we can debug ordering
+     *   - BreakStart: stop heartbeat → our snapshot ages out in 30s,
+     *     teammates' real-teammate filter drops us cleanly
+     *   - BreakEnd: restart heartbeat; the next coordinatorPublish() in
+     *     the main loop republishes our state
+     *   - Pause: same as BreakStart
+     *   - Resume: same as BreakEnd
+     *   - PreEnding/Ending: ensure running=false + heartbeat + port-coord
+     *     shut down, even if external Stop terminated the main loop. */
+    private void registerScriptListeners() {
+        ScriptListening.addPreBreakStartListener(msLength -> {
+            Log.info("LIFECYCLE: break scheduled, duration " + (msLength / 1000)
+                    + "s, state=" + currentState);
+        });
+        ScriptListening.addBreakStartListener(msLength -> {
+            Log.info("LIFECYCLE: break started (" + (msLength / 1000)
+                    + "s) — stopping heartbeat, coord claim ages out in 30s");
+            stopCoordinatorHeartbeat();
+        });
+        ScriptListening.addBreakEndListener(() -> {
+            Log.info("LIFECYCLE: break ended — restarting heartbeat");
+            startCoordinatorHeartbeat();
+        });
+        ScriptListening.addPauseListener(() -> {
+            Log.info("LIFECYCLE: paused — stopping heartbeat");
+            stopCoordinatorHeartbeat();
+        });
+        ScriptListening.addResumeListener(() -> {
+            Log.info("LIFECYCLE: resumed — restarting heartbeat");
+            startCoordinatorHeartbeat();
+        });
+        ScriptListening.addPreEndingListener(() -> {
+            Log.info("LIFECYCLE: script ending — setting running=false");
+            running = false;
+        });
+        ScriptListening.addEndingListener(() -> {
+            Log.info("LIFECYCLE: script ended — final cleanup");
+            stopCoordinatorHeartbeat();
+            if (ACTIVE_PORT_COORD != null) {
+                try { ACTIVE_PORT_COORD.shutdown(); } catch (Exception ignored) {}
+                ACTIVE_PORT_COORD = null;
+            }
+        });
     }
 
     /** 1.9.99.93: read the team's current kill_id from the coordinator.
